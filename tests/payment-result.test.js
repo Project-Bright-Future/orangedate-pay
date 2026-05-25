@@ -6,6 +6,7 @@ import {
   buildResultView,
   statusLabel,
   resultRedirectTarget,
+  successSubtitle,
 } from "../src/payment-result.js";
 
 describe("getOrderId", () => {
@@ -53,6 +54,19 @@ describe("buildResultView", () => {
       confirmed: true, statusLabel: "已確認",
     });
   });
+});
+
+describe("successSubtitle", () => {
+  it("付費（amount>0）confirmed → 付款文案", () =>
+    expect(successSubtitle({ confirmed: true, amount: 100 })).toBe(
+      "我們已收到你的付款，期待與你相見"
+    ));
+  it("免費（amount 0）confirmed → 免費文案，不提付款", () =>
+    expect(successSubtitle({ confirmed: true, amount: 0 })).toBe(
+      "你的報名已確認，本次免費，期待與你相見"
+    ));
+  it("非 confirmed → null（不覆蓋靜態字）", () =>
+    expect(successSubtitle({ confirmed: false, amount: 0 })).toBeNull());
 });
 
 describe("statusLabel", () => {

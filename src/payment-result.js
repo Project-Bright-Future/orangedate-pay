@@ -60,6 +60,16 @@ export function buildResultView(statusRes) {
   };
 }
 
+const PAID_SUBTITLE = "我們已收到你的付款，期待與你相見";
+const FREE_SUBTITLE = "你的報名已確認，本次免費，期待與你相見";
+
+// 成功頁副標：免費（amount 0，訂閱會員）與付費文案不同。
+// 非 confirmed 回 null → 不覆蓋，留 Webflow 靜態字。
+export function successSubtitle(view) {
+  if (!view.confirmed) return null;
+  return view.amount === 0 ? FREE_SUBTITLE : PAID_SUBTITLE;
+}
+
 // ---- Browser glue (skipped under vitest/node) ----
 const CFG = (typeof window !== "undefined" && window.OD_PAYMENT) || {};
 const API_BASE = CFG.apiBase || "https://dev-api.orangedate.com/api/pbf-event";
@@ -80,6 +90,7 @@ function renderView(view) {
   set("od-amount", view.amount != null ? `NT$${view.amount}` : "");
   set("od-order-id", view.orderId);
   set("od-status", view.statusLabel);
+  set("od-subtitle", successSubtitle(view));
 }
 
 async function initResultPage() {
