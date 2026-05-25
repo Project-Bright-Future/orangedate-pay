@@ -113,6 +113,19 @@ export function validateForm(form) {
   return errors;
 }
 
+// Keep the form visible and hide Webflow's native submit done/fail message.
+// We don't block the native submit (the lead still reaches Webflow/email/webhook);
+// payment outcome is driven by our JS (#od-errors on failure, redirect on success).
+export function revertWebflowFormUI(formEl) {
+  if (!formEl) return;
+  const wrap = formEl.closest && formEl.closest(".w-form");
+  if (!wrap) return;
+  formEl.style.display = "";
+  wrap.querySelectorAll(".w-form-done, .w-form-fail").forEach((el) => {
+    el.style.display = "none";
+  });
+}
+
 // ---- Browser glue (skipped under vitest/node) ----
 // 設定值由 Webflow 頁面 custom code 的 window.OD_PAYMENT 帶入（publishableKey 放這、不進 git）：
 //   window.OD_PAYMENT = { publishableKey: "...", env: "sandbox"|"production", apiBase: "..." }
@@ -335,6 +348,23 @@ function setSubmitLabel(btn, text) {
   else btn.textContent = text;
 }
 
+// Watch .w-form and revert whenever Webflow's native submit toggles the done/fail UI.
+// Disconnect during revert so our own style changes don't re-trigger the observer.
+function neutralizeWebflowFormUI(formEl) {
+  if (typeof MutationObserver === "undefined") return;
+  const wrap = formEl.closest(".w-form");
+  if (!wrap) return;
+  const targets = [formEl, ...wrap.querySelectorAll(".w-form-done, .w-form-fail")];
+  const opts = { attributes: true, attributeFilter: ["style"] };
+  const observe = () => targets.forEach((t) => obs.observe(t, opts));
+  const obs = new MutationObserver(() => {
+    obs.disconnect();
+    revertWebflowFormUI(formEl);
+    observe();
+  });
+  observe();
+}
+
 async function initPaymentFlow() {
   const formEl = document.querySelector("#wf-form form") || document.querySelector("form");
   if (!formEl) return;
@@ -417,6 +447,7 @@ async function initPaymentFlow() {
     }
   });
 
+  neutralizeWebflowFormUI(formEl); // keep native submit (notification), suppress fake-success UI
   loadSessions(formEl, onFieldChange).catch((e) => console.error("loadSessions", e));
 }
 
