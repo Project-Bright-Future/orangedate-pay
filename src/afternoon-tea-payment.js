@@ -63,6 +63,19 @@ export function sessionGenderOpen(session, gender) {
   return gender === "male" ? !!session.is_male_open : !!session.is_female_open;
 }
 
+// 把後端 registration_end_at（ISO 8601）轉成卡片上要顯示的「報名至 M/D HH:mm」。
+// null / undefined / 解析失敗 → 空字串（呼叫端用空字串判斷不顯示）。
+export function formatDeadline(isoString) {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return "";
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `報名至 ${m}/${day} ${hh}:${mm}`;
+}
+
 // 把後端 GET /sessions/ 的單筆場次整理成卡片顯示用資料（純函式，免 DOM 可測）。
 export function formatSessionCard(session) {
   const hhmm = (t) => (t || "").slice(0, 5);
@@ -71,6 +84,7 @@ export function formatSessionCard(session) {
     title: session.title || "",
     timeLabel: `${session.date || ""} ${hhmm(session.start_time)}–${hhmm(session.end_time)}`,
     location: session.location_name || "",
+    deadlineLabel: formatDeadline(session.registration_end_at),
     maleLabel: `男生剩餘名額：${session.remaining_male}`,
     femaleLabel: `女生剩餘名額：${session.remaining_female}`,
     soldOut: !session.is_male_open && !session.is_female_open,
@@ -195,6 +209,7 @@ function injectSessionStyles() {
     .od-card-meta { color: #666; margin: 4px 0 10px; }
     .od-card-counts { display: flex; gap: 24px; font-size: .9rem; }
     .od-card-counts span { color: #555; }
+    .od-card-deadline { color: #888; font-size: .85rem; margin-top: 8px; }
   `;
   document.head.appendChild(style);
 }
@@ -230,6 +245,13 @@ function renderSessions(container, sessions, formEl, onSelect) {
     card.appendChild(title);
     card.appendChild(meta);
     card.appendChild(counts);
+
+    if (c.deadlineLabel) {
+      const deadline = document.createElement("div");
+      deadline.className = "od-card-deadline";
+      deadline.textContent = c.deadlineLabel;
+      card.appendChild(deadline);
+    }
 
     if (!c.soldOut) {
       card.addEventListener("click", () => {

@@ -5,6 +5,7 @@ import {
   routeRegistrationResponse,
   formatQuoteResult,
   sessionGenderOpen,
+  formatDeadline,
   formatSessionCard,
   canAutoQuote,
   normalizeGender,
@@ -110,6 +111,32 @@ describe("sessionGenderOpen", () => {
   it("女生已滿", () => expect(sessionGenderOpen(session, "female")).toBe(false));
 });
 
+describe("formatDeadline", () => {
+  it("ISO 字串 → 報名至 M/D HH:mm", () => {
+    // 用台北時區（UTC+8）的時刻：2026-06-05 23:59 in TPE
+    expect(formatDeadline("2026-06-05T23:59:00+08:00")).toMatch(
+      /^報名至 6\/5 \d{2}:\d{2}$/
+    );
+  });
+  it("正中午個位數月份日期", () => {
+    expect(formatDeadline("2026-06-05T12:00:00+08:00")).toMatch(
+      /^報名至 6\/5 \d{2}:00$/
+    );
+  });
+  it("null → 空字串", () => {
+    expect(formatDeadline(null)).toBe("");
+  });
+  it("undefined → 空字串", () => {
+    expect(formatDeadline(undefined)).toBe("");
+  });
+  it("空字串 → 空字串", () => {
+    expect(formatDeadline("")).toBe("");
+  });
+  it("無效字串 → 空字串", () => {
+    expect(formatDeadline("not-a-date")).toBe("");
+  });
+});
+
 describe("formatSessionCard", () => {
   const s = {
     id: 1, title: "週六午後場", date: "2026-06-14",
@@ -118,12 +145,13 @@ describe("formatSessionCard", () => {
     remaining_male: 2, remaining_female: 0,
     is_male_open: true, is_female_open: false,
   };
-  it("組出卡片顯示欄位", () => {
+  it("組出卡片顯示欄位（無 registration_end_at → deadlineLabel 空）", () => {
     expect(formatSessionCard(s)).toEqual({
       id: 1,
       title: "週六午後場",
       timeLabel: "2026-06-14 14:00–16:00",
       location: "某某咖啡廳",
+      deadlineLabel: "",
       maleLabel: "男生剩餘名額：2",
       femaleLabel: "女生剩餘名額：0",
       soldOut: false,
@@ -133,6 +161,11 @@ describe("formatSessionCard", () => {
     expect(
       formatSessionCard({ ...s, is_male_open: false, is_female_open: false }).soldOut
     ).toBe(true);
+  });
+  // 只驗新欄位；其餘欄位的 shape 已由上方測試 1 用 toEqual 覆蓋。
+  it("有 registration_end_at → deadlineLabel 含「報名至」", () => {
+    const out = formatSessionCard({ ...s, registration_end_at: "2026-06-10T23:59:00+08:00" });
+    expect(out.deadlineLabel).toMatch(/^報名至 6\/10 /);
   });
 });
 
