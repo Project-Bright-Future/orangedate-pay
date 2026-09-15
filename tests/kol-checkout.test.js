@@ -288,7 +288,14 @@ import {
   renderStep2,
   renderStep3,
   LEGAL_LINE,
+  STYLES,
 } from "../src/kol-checkout.js";
+
+describe("STYLES", () => {
+  it("同意勾選內的 <a> 保持 inline（v1.1.1：Webflow 全站 a 樣式會把它擠成獨立行）", () => {
+    expect(STYLES).toMatch(/\.odk-check a \{[^}]*display: inline;/);
+  });
+});
 
 describe("escapeHtml", () => {
   it("跳脫 < > & \" '", () => expect(escapeHtml(`<a href="x">&'</a>`)).toBe("&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;"));
