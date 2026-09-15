@@ -300,6 +300,46 @@ export function eventProps({ kolCode, env }, extra) {
   return { kol_code: kolCode, environment: analyticsEnvironment(env), event_source: "web", ...extra };
 }
 
+// 注入到 <head> 的樣式（由 JS 注入，避免 Webflow tree-shake）。
+export const STYLES = `
+    #od-kol { max-width: 560px; margin: 0 auto; padding: 8px 16px 40px; line-height: 1.7; color: #333; }
+    .odk-kicker { color: #ff6b35; font-weight: 700; letter-spacing: .02em; }
+    .odk-plan { font-size: 1.5rem; font-weight: 700; margin: 4px 0; }
+    .odk-price { font-size: 2.2rem; font-weight: 800; color: #ff6b35; line-height: 1.2; }
+    .odk-muted { color: #888; }
+    .odk-save { margin: 4px 0 12px; }
+    .odk-notice { background: #fff3ee; border-left: 4px solid #ff6b35; padding: 10px 14px; border-radius: 6px; }
+    .odk-bullets { padding-left: 1.2em; color: #555; font-size: .95rem; margin: 16px 0 0; }
+    .odk-btn { display: inline-block; width: 100%; box-sizing: border-box; text-align: center; background: #ff6b35; color: #fff;
+      border: 0; border-radius: 999px; padding: 14px 24px; font-size: 1.05rem; font-weight: 700; cursor: pointer; text-decoration: none; }
+    .odk-btn[disabled] { background: #ccc; color: #fff; cursor: not-allowed; }
+    .odk-btn-secondary { background: #fff; color: #ff6b35; border: 2px solid #ff6b35; width: auto; padding: 10px 18px; white-space: nowrap; }
+    .odk-btn-secondary[disabled] { background: #fff; color: #bbb; border-color: #ddd; }
+    #odk-checkout { margin-top: 28px; padding-top: 20px; border-top: 1px solid #eee; }
+    .odk-step-title { font-size: 1.15rem; font-weight: 700; margin: 0 0 12px; }
+    .odk-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    .odk-row input[type=tel], .odk-row input[type=text] { flex: 1 1 160px; min-width: 0; height: 44px; padding: 0 12px;
+      border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; }
+    .odk-help { color: #666; font-size: .9rem; margin: 6px 0; }
+    .odk-err { color: #e53935; font-size: .95rem; min-height: 1.2em; margin: 8px 0 0; }
+    .odk-sent { font-weight: 700; margin: 12px 0 6px; }
+    .odk-branch { background: #f7f7f7; border-radius: 8px; padding: 10px 14px; }
+    .odk-plan-box { border: 2px solid #eee; border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
+    .odk-line { display: flex; justify-content: space-between; gap: 12px; }
+    .odk-code-row label { font-weight: 700; }
+    .odk-code-row input { flex: 0 1 160px; text-transform: uppercase; }
+    .odk-ok { color: #43a047; font-size: .9rem; }
+    .odk-dead { color: #e53935; font-size: .9rem; }
+    .odk-check { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; cursor: pointer; }
+    .odk-check input { margin-top: 6px; flex: none; }
+    .odk-check a { color: #ff6b35; display: inline; } /* v1.1.1：Webflow 全站 a 樣式會把它擠成獨立行 */
+    .odk-legal { font-weight: 700; margin: 14px 0 6px; }
+    .odk-company { color: #777; font-size: .85rem; margin: 0 0 16px; }
+    .odk-card { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 16px; }
+    .odk-card > div { min-height: 44px; }
+    #odk-next2 { margin-top: 12px; }
+`;
+
 // ============================================================================
 // Browser glue（vitest/node 略過）。設定由 Webflow head custom code 的 window.OD_KOL 帶入（publishableKey 不進 git）：
 //   window.OD_KOL = { publishableKey, env: "sandbox"|"production", apiBase, kolCode?, successPath?, taxId?, address? }
@@ -337,44 +377,7 @@ function injectStyles() {
   if (document.getElementById("odk-styles")) return;
   const style = document.createElement("style");
   style.id = "odk-styles";
-  style.textContent = `
-    #od-kol { max-width: 560px; margin: 0 auto; padding: 8px 16px 40px; line-height: 1.7; color: #333; }
-    .odk-kicker { color: #ff6b35; font-weight: 700; letter-spacing: .02em; }
-    .odk-plan { font-size: 1.5rem; font-weight: 700; margin: 4px 0; }
-    .odk-price { font-size: 2.2rem; font-weight: 800; color: #ff6b35; line-height: 1.2; }
-    .odk-muted { color: #888; }
-    .odk-save { margin: 4px 0 12px; }
-    .odk-notice { background: #fff3ee; border-left: 4px solid #ff6b35; padding: 10px 14px; border-radius: 6px; }
-    .odk-bullets { padding-left: 1.2em; color: #555; font-size: .95rem; margin: 16px 0 0; }
-    .odk-btn { display: inline-block; width: 100%; box-sizing: border-box; text-align: center; background: #ff6b35; color: #fff;
-      border: 0; border-radius: 999px; padding: 14px 24px; font-size: 1.05rem; font-weight: 700; cursor: pointer; text-decoration: none; }
-    .odk-btn[disabled] { background: #ccc; color: #fff; cursor: not-allowed; }
-    .odk-btn-secondary { background: #fff; color: #ff6b35; border: 2px solid #ff6b35; width: auto; padding: 10px 18px; white-space: nowrap; }
-    .odk-btn-secondary[disabled] { background: #fff; color: #bbb; border-color: #ddd; }
-    #odk-checkout { margin-top: 28px; padding-top: 20px; border-top: 1px solid #eee; }
-    .odk-step-title { font-size: 1.15rem; font-weight: 700; margin: 0 0 12px; }
-    .odk-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-    .odk-row input[type=tel], .odk-row input[type=text] { flex: 1 1 160px; min-width: 0; height: 44px; padding: 0 12px;
-      border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; }
-    .odk-help { color: #666; font-size: .9rem; margin: 6px 0; }
-    .odk-err { color: #e53935; font-size: .95rem; min-height: 1.2em; margin: 8px 0 0; }
-    .odk-sent { font-weight: 700; margin: 12px 0 6px; }
-    .odk-branch { background: #f7f7f7; border-radius: 8px; padding: 10px 14px; }
-    .odk-plan-box { border: 2px solid #eee; border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
-    .odk-line { display: flex; justify-content: space-between; gap: 12px; }
-    .odk-code-row label { font-weight: 700; }
-    .odk-code-row input { flex: 0 1 160px; text-transform: uppercase; }
-    .odk-ok { color: #43a047; font-size: .9rem; }
-    .odk-dead { color: #e53935; font-size: .9rem; }
-    .odk-check { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; cursor: pointer; }
-    .odk-check input { margin-top: 6px; flex: none; }
-    .odk-check a { color: #ff6b35; }
-    .odk-legal { font-weight: 700; margin: 14px 0 6px; }
-    .odk-company { color: #777; font-size: .85rem; margin: 0 0 16px; }
-    .odk-card { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 16px; }
-    .odk-card > div { min-height: 44px; }
-    #odk-next2 { margin-top: 12px; }
-  `;
+  style.textContent = STYLES;
   document.head.appendChild(style);
 }
 
