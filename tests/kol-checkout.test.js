@@ -393,3 +393,17 @@ describe("normalizePhone", () => {
     expect(normalizePhone("")).toBe("");
   });
 });
+
+import { eventProps, analyticsEnvironment } from "../src/kol-checkout.js";
+describe("analytics props", () => {
+  it("91APP env production → prod，其餘 → dev", () => {
+    expect(analyticsEnvironment("production")).toBe("prod");
+    expect(analyticsEnvironment("sandbox")).toBe("dev");
+    expect(analyticsEnvironment(undefined)).toBe("dev");
+  });
+  it("每個事件帶 kol_code / environment / event_source=web + 額外參數；不含手機", () => {
+    expect(eventProps({ kolCode: "TESTKOL1", env: "sandbox" }, { attempt_no: 2 })).toEqual({
+      kol_code: "TESTKOL1", environment: "dev", event_source: "web", attempt_no: 2,
+    });
+  });
+});

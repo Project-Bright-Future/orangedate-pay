@@ -289,6 +289,17 @@ export function normalizePhone(raw) {
   return /^09\d{8}$/.test(d) ? d : "";
 }
 
+// ---- PostHog（C-7）----
+// 後端用 super property 分環境（environment: dev|prod、event_source: server）；前端每個事件同樣帶上，
+// 否則 prod 儀表板篩不掉 staging 資料。environment 由 91APP env 推：production → prod、其餘 → dev。
+export function analyticsEnvironment(sdkEnv) {
+  return sdkEnv === "production" ? "prod" : "dev";
+}
+// 🔴 任何事件都不得帶手機號（明碼或遮罩都不要）。
+export function eventProps({ kolCode, env }, extra) {
+  return { kol_code: kolCode, environment: analyticsEnvironment(env), event_source: "web", ...extra };
+}
+
 // ============================================================================
 // Browser glue（vitest/node 略過）。設定由 Webflow head custom code 的 window.OD_KOL 帶入（publishableKey 不進 git）：
 //   window.OD_KOL = { publishableKey, env: "sandbox"|"production", apiBase, kolCode?, successPath?, taxId?, address? }
@@ -296,7 +307,8 @@ export function normalizePhone(raw) {
 const CFG = (typeof window !== "undefined" && window.OD_KOL) || {};
 const API_BASE = CFG.apiBase || "https://dev-api.orangedate.com/api/pbf-kol";
 const SUCCESS_PATH = CFG.successPath || "/kol-payment-success";
-const COMPANY = { taxId: CFG.taxId || "{統編}", address: CFG.address || "{公司地址}" }; // 值待 Moe 給
+// 公開登記資料（twincn / ldigi 查得）；揭露用登記地址或營業地址待 Wilson 確認，可由 OD_KOL.taxId / address 覆寫。
+const COMPANY = { taxId: CFG.taxId || "93484326", address: CFG.address || "臺北市萬華區長泰街308巷33號1樓" };
 const COOKIE_CODE = "od_kol";
 const COOKIE_RETURN = "od_kol_return";
 const COOKIE_DAYS = 30;
@@ -306,6 +318,13 @@ const RESEND_COOLDOWN = 60;
 function track(name, props) {
   try {
     if (typeof window !== "undefined" && window.posthog && window.posthog.capture) window.posthog.capture(name, props);
+  } catch (_) {}
+}
+function registerSuperProps() {
+  try {
+    if (window.posthog && window.posthog.register) {
+      window.posthog.register({ environment: analyticsEnvironment(CFG.env), event_source: "web" });
+    }
   } catch (_) {}
 }
 function identify(userId) {
@@ -385,7 +404,8 @@ async function initKolCheckout() {
     verify: null, terms: null, consent1: false, consent2: false, consentTracked: false,
     cardOk: false, busy: false,
   };
-  const trackProps = (extra) => ({ kol_code: st.kolCode, ...extra });
+  const trackProps = (extra) => eventProps({ kolCode: st.kolCode, env: CFG.env }, extra);
+  registerSuperProps();
 
   // ---- 落地頁 ----
   root.innerHTML = `<div id="odk-landing"></div>
@@ -571,15 +591,19 @@ async function initKolCheckout() {
       consent1: st.consent1, consent2: st.consent2, termsLoaded: !!st.terms, promoOk: !!st.promo, cardOk: st.cardOk, busy: st.busy,
     });
   }
+  // 條款版本 id 會變 → 每次進步驟三都現拉、不 cache。第一次 render 全區塊並掛卡片 iframe；
+  // 之後只更新連結 + 重勾（重 render 會毀掉 91APP iframe）。
+  let step3Rendered = false;
   async function enterStep3() {
     showStep(3);
     const step3 = $("#odk-step3");
-    if (!st.terms) {
-      step3.innerHTML = `<p class="odk-help">載入中…</p>`;
-      let t;
-      try { t = await loadTerms(); } catch (err) { console.error("terms", err); t = { ok: false, message: "系統忙線中，請稍後再試" }; }
-      if (!t.ok) { renderUnavailable(t.message); return; }
+    if (!step3Rendered) step3.innerHTML = `<p class="odk-help">載入中…</p>`;
+    let t;
+    try { t = await loadTerms(); } catch (err) { console.error("terms", err); t = { ok: false, message: "系統忙線中，請稍後再試" }; }
+    if (!t.ok) { renderUnavailable(t.message); return; }
+    if (!step3Rendered) {
       step3.innerHTML = renderStep3({ price: formatTwd(st.promo.price_twd), terms: t.terms, company: COMPANY });
+      step3Rendered = true;
       st.terms = t.terms;
       $("#odk-c1").addEventListener("change", onConsentChange);
       $("#odk-c2").addEventListener("change", onConsentChange);
@@ -589,6 +613,7 @@ async function initKolCheckout() {
       card.mount();
       card.onUpdate((u) => { st.cardOk = !!(u && u.canGetToken); refreshPayButton(); });
     } else {
+      applyTerms(t.terms);
       $("#odk-pay").textContent = `前往付款 NT$${formatTwd(st.promo.price_twd)}`;
     }
     refreshPayButton();
