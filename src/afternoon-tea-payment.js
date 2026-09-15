@@ -1,3 +1,6 @@
+import { createApi } from "./lib/api.js";
+import { createCard91 } from "./lib/card91.js";
+
 export function buildQuotePayload(form) {
   return {
     session_id: form.session_id,
@@ -148,15 +151,7 @@ const API_BASE = CFG.apiBase || "https://dev-api.orangedate.com/api/pbf-event";
 const PUBLISHABLE_KEY = CFG.publishableKey || "";
 const SDK_ENV = CFG.env || "sandbox";
 
-async function api(path, options) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  let body = {};
-  try { body = await res.json(); } catch (_) {}
-  return { httpStatus: res.status, body };
-}
+const api = createApi(API_BASE);
 
 // 左：後端契約欄位 → 右：Webflow 表單實際 name（2026-05-24 於 Designer 確認）。
 // 採 JS 對應表而非改 Webflow 欄位名，避免動到原生表單欄位、且集中一處易維護。
@@ -287,27 +282,10 @@ function setCardVisible(visible) {
   if (el) el.style.display = visible ? "" : "none";
 }
 
-// 91APP Web SDK 信用卡欄位以 iframe 掛載到這三個 div（不是單一容器）。
-// 須先 setup 再讓使用者輸入，最後才 getTxnToken。setup 只做一次。
-let sdkSetup = false;
-let cardMounted = false;
+// 91APP 卡片欄位 glue 見 lib/card91.js（setup / mount 皆只做一次）。
+let card = null;
 function mountCardFields() {
-  if (cardMounted) return;
-  Payments91APP.card.setup({
-    enableIcon: false,
-    fields: {
-      number: { element: "#card-number", placeholder: "信用卡號" },
-      expirationDate: { element: "#card-expiration-date", placeholder: "有效期限 MM/YY" },
-      ccv: { element: "#card-ccv", placeholder: "末三碼" },
-    },
-    styles: {
-      normal: { width: "100%", height: "44px", color: "#333333", borderColor: "#DDDDDD" },
-      focus: { borderColor: "#ff6b35" },
-      error: { color: "#e53935", borderColor: "#e53935" },
-      success: { borderColor: "#43a047" },
-    },
-  });
-  cardMounted = true;
+  if (card) card.mount();
 }
 
 // 步驟一：試算金額。回傳 { form, quote }，失敗回 null。
@@ -341,8 +319,7 @@ async function runQuote(formEl) {
 async function submitRegistration(form, quote) {
   let txnToken = "";
   if (quote.needsCard) {
-    const r = await Payments91APP.card.getTxnToken();
-    txnToken = r && r.txnToken ? r.txnToken : "";
+    txnToken = card ? await card.getTxnToken() : "";
     if (!txnToken) {
       showErrors(["信用卡資訊有誤，請確認卡號、有效期限與末三碼"]);
       return;
@@ -391,14 +368,12 @@ async function initPaymentFlow() {
   const formEl = document.querySelector("#wf-form form") || document.querySelector("form");
   if (!formEl) return;
 
-  if (typeof Payments91APP === "undefined") {
+  if (!card) card = createCard91();
+  if (!card.available) {
     console.error("91APP SDK 載入失敗");
     return;
   }
-  if (!sdkSetup) { // 防 DOMContentLoaded 重觸發導致重複 setup
-    Payments91APP.setupSDK(PUBLISHABLE_KEY, SDK_ENV);
-    sdkSetup = true;
-  }
+  card.setup(PUBLISHABLE_KEY, SDK_ENV);
   setCardVisible(false); // 試算前不顯示卡片欄位
 
   // 自動試算單按鈕流程：選好場次+填齊手機 → 自動 /quote/ → 顯示金額/卡片、

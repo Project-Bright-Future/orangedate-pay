@@ -1,3 +1,5 @@
+import { pollUntil } from "./lib/poll.js";
+
 const TERMINAL = ["confirmed", "failed", "expired", "cancelled"];
 
 export function getOrderId(search) {
@@ -9,16 +11,8 @@ export function isTerminalStatus(status) {
   return TERMINAL.includes(status);
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-export async function pollStatus(orderId, fetchFn, { intervalMs = 2000, maxAttempts = 15 } = {}) {
-  let last = null;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    last = await fetchFn(orderId);
-    if (isTerminalStatus(last.status)) return last;
-    if (attempt < maxAttempts - 1) await sleep(intervalMs);
-  }
-  return { ...last, timedOut: true };
+export function pollStatus(orderId, fetchFn, opts) {
+  return pollUntil(() => fetchFn(orderId), (r) => isTerminalStatus(r.status), opts);
 }
 
 const STATUS_LABELS = {
