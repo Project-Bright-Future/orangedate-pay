@@ -4,6 +4,7 @@ import { parseCookie, serializeCookie } from "./lib/cookie.js";
 import { formatTpeDate, formatTwd, escapeHtml } from "./lib/format.js";
 import { createApi } from "./lib/api.js";
 import { createCard91 } from "./lib/card91.js";
+import { applyNavOffset } from "./lib/nav-offset.js";
 export { parseCookie, serializeCookie, formatTpeDate, formatTwd, escapeHtml };
 
 // ---- kol_code 來源 / cookie ----
@@ -408,6 +409,9 @@ async function initKolCheckout() {
   const root = document.querySelector("#od-kol");
   if (!root) return;
   injectStyles();
+  const navPad = () => applyNavOffset(root, { basePx: 8 }); // 8 = STYLES #od-kol padding-top
+  navPad();
+  window.addEventListener("resize", navPad);
 
   const api = createApi(API_BASE);
   const card = createCard91();

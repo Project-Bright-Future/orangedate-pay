@@ -4,6 +4,7 @@ import { pollUntil } from "./lib/poll.js";
 import { createApi } from "./lib/api.js";
 import { parseCookie } from "./lib/cookie.js";
 import { formatTpeDate, escapeHtml as e } from "./lib/format.js";
+import { applyNavOffset } from "./lib/nav-offset.js";
 
 export const PROCESSING_COPY = "款項處理中，開通後會用簡訊通知你";
 export const APP_DOWNLOAD_URL = "https://onelink.to/zqfayt";
@@ -87,6 +88,9 @@ async function initResultPage() {
   const root = document.querySelector("#od-kol-result");
   if (!root) return;
   injectStyles();
+  const navPad = () => applyNavOffset(root, { basePx: 24 }); // 24 = #od-kol-result padding-top
+  navPad();
+  window.addEventListener("resize", navPad);
   const orderId = new URLSearchParams(window.location.search).get("order");
   const returnPath = parseCookie(document.cookie, "od_kol_return") || "/";
   if (!orderId) { root.innerHTML = renderResult({ state: "not_found" }, { returnPath }); return; }
