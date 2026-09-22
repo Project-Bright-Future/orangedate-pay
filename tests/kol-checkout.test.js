@@ -285,6 +285,7 @@ import {
   escapeHtml,
   renderLanding,
   renderStep1,
+  renderOtpCells,
   renderStep2,
   renderStep3,
   LEGAL_LINE,
@@ -341,6 +342,48 @@ describe("renderStep1", () => {
     expect(h).toContain('id="odk-otp"');
     expect(h).toContain('id="odk-verify"');
     expect(h).toContain("60 秒後可以重新傳送");
+  });
+
+  it("v1.2.0：兩欄有文字標籤（C-1-2）", () => {
+    const h = renderStep1();
+    expect(h).toMatch(/<label for="odk-phone"[^>]*>手機號碼<\/label>/);
+    expect(h).toMatch(/<label for="odk-otp"[^>]*>驗證碼<\/label>/);
+  });
+
+  it("v1.2.0：驗證碼是單一 one-time-code input 疊在六格上", () => {
+    const h = renderStep1();
+    expect(h).toMatch(/<input id="odk-otp"[^>]*autocomplete="one-time-code"/);
+    expect(h).not.toMatch(/<input id="odk-otp"[^>]*maxlength/); // 不設 maxlength：貼上「123 456」會被原生先截成 6 字元再少一碼；6 碼上限由 glue 過濾後 slice
+    expect(h).toContain('id="odk-otp-cells"');
+    expect(h.match(/class="odk-cell"/g)).toHaveLength(6); // 精確比對，避免撞到 .odk-cells 容器
+  });
+});
+
+describe("renderOtpCells", () => {
+  const cells = (h) => [...h.matchAll(/<span class="(odk-cell[^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
+  it("空值 + 聚焦第 0 格：六格全空、只有第 0 格 active", () => {
+    const c = cells(renderOtpCells("", 0));
+    expect(c).toHaveLength(6);
+    expect(c.map((x) => x[1])).toEqual(["", "", "", "", "", ""]);
+    expect(c.map((x) => x[0].includes("active"))).toEqual([true, false, false, false, false, false]);
+  });
+  it("輸入 12、游標在 2：前兩格有字、第 2 格 active", () => {
+    const c = cells(renderOtpCells("12", 2));
+    expect(c.map((x) => x[1])).toEqual(["1", "2", "", "", "", ""]);
+    expect(c.map((x) => x[0].includes("active"))).toEqual([false, false, true, false, false, false]);
+  });
+  it("填滿 6 碼：active 停在最後一格", () => {
+    const c = cells(renderOtpCells("123456", 5));
+    expect(c.map((x) => x[1])).toEqual(["1", "2", "3", "4", "5", "6"]);
+    expect(c[5][0]).toContain("active");
+  });
+  it("未聚焦（activeIndex null）：沒有任何 active", () => {
+    const c = cells(renderOtpCells("12", null));
+    expect(c.some((x) => x[0].includes("active"))).toBe(false);
+  });
+  it("字元會 escape", () => {
+    expect(renderOtpCells("<", null)).not.toContain("><<");
+    expect(renderOtpCells("<", null)).toContain("&lt;");
   });
 });
 
