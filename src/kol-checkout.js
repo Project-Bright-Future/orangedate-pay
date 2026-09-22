@@ -226,10 +226,20 @@ export function renderLanding(v) {
 </section>`;
 }
 
+// 驗證碼六格（v1.2.0，C-1-2 的 □□□□□□）：純視覺鏡射，真正的 input 是 #odk-otp 透明疊在上面，
+// 貼上 / 倒退 / 簡訊自動填入全走原生。activeIndex = 游標所在格（null = 未聚焦）。
+export function renderOtpCells(value, activeIndex) {
+  const v = String(value || "");
+  return Array.from({ length: 6 }, (_, i) =>
+    `<span class="odk-cell${i === activeIndex ? " active" : ""}" data-i="${i}">${e(v[i] || "")}</span>`
+  ).join("");
+}
+
 // 步驟一（C-1-2）。OTP 區塊送出後才顯示；#odk-send 送出後兼重送鈕（60 秒冷卻由 glue 計時）。
 export function renderStep1() {
   return `
 <h3 class="odk-step-title">步驟 1 / 3　確認你的手機號碼</h3>
+<label for="odk-phone" class="odk-label">手機號碼</label>
 <div class="odk-row">
   <input id="odk-phone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="13" placeholder="09XX XXX XXX">
   <button type="button" id="odk-send" class="odk-btn odk-btn-secondary">傳送驗證碼</button>
@@ -237,8 +247,12 @@ export function renderStep1() {
 <p class="odk-help">我們用手機號碼幫你開通會員，也用它登入 App。請填你之後會用來登入的號碼。</p>
 <div id="odk-otp-block" hidden>
   <p id="odk-sent" class="odk-sent"></p>
+  <label for="odk-otp" class="odk-label">驗證碼</label>
   <div class="odk-row">
-    <input id="odk-otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="驗證碼 6 碼">
+    <div class="odk-otp-wrap">
+      <div id="odk-otp-cells" class="odk-cells" aria-hidden="true">${renderOtpCells("", null)}</div>
+      <input id="odk-otp" type="text" inputmode="numeric" autocomplete="one-time-code" aria-label="驗證碼 6 碼">
+    </div>
     <button type="button" id="odk-verify" class="odk-btn">確認</button>
   </div>
   <p class="odk-help" id="odk-resend-hint">沒收到？60 秒後可以重新傳送</p>
@@ -323,6 +337,15 @@ export const STYLES = `
     .odk-help { color: #666; font-size: .9rem; margin: 6px 0; }
     .odk-err { color: #e53935; font-size: .95rem; min-height: 1.2em; margin: 8px 0 0; }
     .odk-sent { font-weight: 700; margin: 12px 0 6px; }
+    .odk-label { display: block; font-weight: 700; margin: 0 0 4px; }
+    /* v1.2.0 驗證碼六格：.odk-cells 只是視覺，透明的 #odk-otp 蓋在整個 wrap 上接所有輸入 */
+    .odk-otp-wrap { position: relative; flex: 1 1 260px; min-width: 0; }
+    .odk-cells { display: flex; gap: 8px; }
+    .odk-cell { flex: 1 1 0; height: 48px; display: flex; align-items: center; justify-content: center;
+      border: 1px solid #ddd; border-radius: 8px; background: #fff; font-size: 1.3rem; font-weight: 700; }
+    .odk-cell.active { border-color: #ff6b35; box-shadow: 0 0 0 2px rgba(255,107,53,.2); }
+    .odk-row .odk-otp-wrap input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0;
+      margin: 0; padding: 0; border: 0; font-size: 16px; } /* 16px：iOS 聚焦不放大 */
     .odk-branch { background: #f7f7f7; border-radius: 8px; padding: 10px 14px; }
     .odk-plan-box { border: 2px solid #eee; border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
     .odk-line { display: flex; justify-content: space-between; gap: 12px; }
@@ -471,8 +494,21 @@ async function initKolCheckout() {
     $("#odk-step1").innerHTML = renderStep1();
     $("#odk-send").addEventListener("click", sendOtp);
     $("#odk-verify").addEventListener("click", verifyOtp);
-    $("#odk-otp").addEventListener("keydown", (ev) => { if (ev.key === "Enter") verifyOtp(); });
+    const otp = $("#odk-otp");
+    otp.addEventListener("keydown", (ev) => { if (ev.key === "Enter") verifyOtp(); });
+    ["input", "focus", "blur"].forEach((t) => otp.addEventListener(t, syncOtpCells));
+    $("#odk-otp-cells").addEventListener("click", () => otp.focus());
     $("#odk-phone").addEventListener("keydown", (ev) => { if (ev.key === "Enter") sendOtp(); });
+  }
+
+  // 六格鏡射：只留數字、最多 6 碼；聚焦時 active 格 = 下一個要填的位置（填滿停在第 6 格）。
+  function syncOtpCells() {
+    const otp = $("#odk-otp");
+    if (!otp) return;
+    const v = String(otp.value || "").replace(/\D/g, "").slice(0, 6);
+    if (v !== otp.value) otp.value = v;
+    const active = document.activeElement === otp ? Math.min(v.length, 5) : null;
+    $("#odk-otp-cells").innerHTML = renderOtpCells(v, active);
   }
 
   async function sendOtp() {
@@ -488,7 +524,7 @@ async function initKolCheckout() {
         st.phone = phone; st.otpToken = r.token;
         $("#odk-otp-block").hidden = false;
         setText("#odk-sent", `驗證碼已經傳到 ${r.phoneMasked}`);
-        $("#odk-otp").value = ""; $("#odk-otp").focus();
+        $("#odk-otp").value = ""; $("#odk-otp").focus(); syncOtpCells();
         track("kol_otp_requested", trackProps({ attempt_no: st.attemptNo }));
         startCooldown();
       } else if (r.action === "banned") {
