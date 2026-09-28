@@ -162,6 +162,13 @@ export function buildOrderPayload({ checkoutToken, promoCode, txnToken, terms })
   };
 }
 
+// 分支 c（已是尊榮）→ 記原到期日給完成頁；其他分支 null。orders/status 不回原到期日，只能前端帶。
+export const PREV_EXPIRE_KEY = "od_kol_prev_expire";
+export function prevExpireRecord(verify, orderId) {
+  const exp = verify && verify.branch === "c" && verify.membership && verify.membership.expires_at;
+  return exp && orderId ? { orderId, prevExpireAt: exp } : null;
+}
+
 // POST orders/ 回應分流（api.md §2.5 / §5）。200 三種形狀：paid / pending+redirect（3DS）/ pending 無 redirect（輪詢）。
 export function orderRoute({ httpStatus, body }) {
   body = body || {};
@@ -683,6 +690,11 @@ async function initKolCheckout() {
       });
       const r = orderRoute(res);
       if (r.userId != null) identify(r.userId);
+      try {
+        const rec = prevExpireRecord(st.verify, r.orderId);
+        if (rec) sessionStorage.setItem(PREV_EXPIRE_KEY, JSON.stringify(rec));
+        else if (r.orderId) sessionStorage.removeItem(PREV_EXPIRE_KEY);
+      } catch (_) { /* 無 sessionStorage → 完成頁退回一般文案 */ }
       switch (r.action) {
         case "done":
         case "poll":
