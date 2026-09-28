@@ -23,7 +23,7 @@ describe("resultView", () => {
   it("paid+granted → success，日期轉 TPE、phone_masked", () => {
     expect(resultView(paid)).toEqual({
       state: "success", orderId: "KOL-20260915-001",
-      paidAt: "2026/09/15", expireAt: "2026/12/14", phoneMasked: "0944***093",
+      paidAt: "2026/09/15", expireAt: "2026/12/14", phoneMasked: "0944***093", prevExpireAt: null,
     });
   });
   it("timedOut / pending → processing", () => {
@@ -35,6 +35,24 @@ describe("resultView", () => {
     expect(resultView({ status: "expired" }).state).toBe("failed");
     expect(resultView({ status: "refunded" }).state).toBe("refunded");
     expect(resultView({ code: "order_not_found", timedOut: true }).state).toBe("not_found");
+  });
+});
+
+describe("延長（分支 c）", () => {
+  const prev = { orderId: "KOL-20260915-001", prevExpireAt: "2027-09-10T02:00:00Z" };
+  const ext = { ...paid, expire_at: "2027-12-09T02:00:00Z" };
+  it("訂單號對得上 → 顯示從 X 延長到 Y、不寫「權益從今天開始計算」", () => {
+    const v = resultView(ext, prev);
+    expect(v.prevExpireAt).toBe("2027/09/10");
+    const h = renderResult(v, { returnPath: "/" });
+    expect(h).toContain("你的尊榮會員已經延長了。");
+    expect(h).toContain("到期日從 2027/09/10 延長到 2027/12/09");
+    expect(h).not.toContain("有效期間");
+    expect(h).not.toContain("權益從今天開始計算");
+  });
+  it("訂單號不同或沒有 prev → 一般文案", () => {
+    expect(resultView(ext, { ...prev, orderId: "KOL-OTHER" }).prevExpireAt).toBeNull();
+    expect(resultView(ext).prevExpireAt).toBeNull();
   });
 });
 

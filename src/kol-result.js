@@ -18,7 +18,8 @@ export function isKolDone(res) {
   return FINAL_FAIL.includes(res.status);
 }
 
-export function resultView(res) {
+// prev = 結帳頁存的 { orderId, prevExpireAt }；訂單號對得上才算延長。
+export function resultView(res, prev) {
   res = res || {};
   if (res.code === "order_not_found") return { state: "not_found" };
   if (res.status === "paid" && res.grant_status === "granted") {
@@ -28,6 +29,7 @@ export function resultView(res) {
       paidAt: formatTpeDate(res.paid_at),
       expireAt: formatTpeDate(res.expire_at),
       phoneMasked: res.phone_masked || "",
+      prevExpireAt: prev && prev.orderId === res.merchant_order_id && prev.prevExpireAt ? formatTpeDate(prev.prevExpireAt) : null,
     };
   }
   if (res.status === "refunded") return { state: "refunded" };
@@ -41,15 +43,18 @@ export function renderResult(view, { returnPath }) {
     case "success":
       return `
 <h2 class="odk-result-title">開通完成</h2>
-<p>你的尊榮會員已經開通了。</p>
-<p class="odk-period-line">有效期間：${e(view.paidAt)} － ${e(view.expireAt)}</p>
+${view.prevExpireAt
+  ? `<p>你的尊榮會員已經延長了。</p>
+<p class="odk-period-line">到期日從 ${e(view.prevExpireAt)} 延長到 ${e(view.expireAt)}</p>`
+  : `<p>你的尊榮會員已經開通了。</p>
+<p class="odk-period-line">有效期間：${e(view.paidAt)} － ${e(view.expireAt)}</p>`}
 <p>接下來只要兩步：</p>
 <ol class="odk-steps">
   <li>1. 下載橘時相遇 App</li>
   <li>2. 用剛才驗證的手機號碼 ${e(view.phoneMasked)} 登入</li>
 </ol>
 <p><a class="odk-btn" href="${APP_DOWNLOAD_URL}" target="_blank" rel="noopener">下載 App</a></p>
-<p class="odk-help">第一次使用的話，登入後會請你完成人臉驗證，大約三分鐘。<br>權益從今天開始計算，建議先把 App 裝起來。</p>
+${view.prevExpireAt ? "" : `<p class="odk-help">第一次使用的話，登入後會請你完成人臉驗證，大約三分鐘。<br>權益從今天開始計算，建議先把 App 裝起來。</p>`}
 <p class="odk-help">有任何問題，隨時在 LINE 找我們。</p>`;
     case "failed":
       return `<h2 class="odk-result-title">付款未完成</h2><p>這筆付款沒有成功，尚未開通。可以回到結帳頁重新付款，或在 LINE 找我們。</p>${back}`;
@@ -102,7 +107,9 @@ async function initResultPage() {
     isKolDone,
     { intervalMs: 2000, maxAttempts: 15 }
   );
-  root.innerHTML = renderResult(resultView(final), { returnPath });
+  let prev = null;
+  try { prev = JSON.parse(sessionStorage.getItem("od_kol_prev_expire") || "null"); } catch (_) { /* 退回一般文案 */ }
+  root.innerHTML = renderResult(resultView(final, prev), { returnPath });
 }
 
 if (typeof document !== "undefined") {

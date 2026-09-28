@@ -457,3 +457,16 @@ describe("analytics props", () => {
     });
   });
 });
+
+import { prevExpireRecord } from "../src/kol-checkout.js";
+describe("prevExpireRecord", () => {
+  const m = { expires_at: "2027-09-10T02:00:00Z" };
+  it("分支 c + 有訂單號 → 記原到期日", () => {
+    expect(prevExpireRecord({ branch: "c", membership: m }, "KOL-1")).toEqual({ orderId: "KOL-1", prevExpireAt: m.expires_at });
+  });
+  it("其他分支 / 無訂單號 → null", () => {
+    expect(prevExpireRecord({ branch: "b", membership: m }, "KOL-1")).toBeNull();
+    expect(prevExpireRecord({ branch: "c", membership: m }, undefined)).toBeNull();
+    expect(prevExpireRecord(null, "KOL-1")).toBeNull();
+  });
+});
