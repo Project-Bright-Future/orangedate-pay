@@ -5,6 +5,13 @@ import { formatTpeDate, formatTwd, escapeHtml } from "./lib/format.js";
 import { createApi } from "./lib/api.js";
 import { createCard91 } from "./lib/card91.js";
 import { applyNavOffset } from "./lib/nav-offset.js";
+import {
+  BANNED_COPY,
+  GENERIC_ERROR,
+  retryAfterSeconds,
+  otpCreateRoute,
+  otpVerifyRoute as baseOtpVerifyRoute,
+} from "./lib/otp.js";
 export { parseCookie, serializeCookie, formatTpeDate, formatTwd, escapeHtml };
 
 // ---- kol_code 來源 / cookie ----
@@ -46,34 +53,8 @@ export function landingView({ httpStatus, body }, embedDisplayName) {
 }
 
 // ---- 步驟一：OTP ----
-export const BANNED_COPY = "這個號碼的帳號已經停用了。想重新開始的話，在 LINE 找我們，我們幫你處理。";
-const GENERIC_ERROR = "系統忙線中，請稍後再試";
-
-// Retry-After 可能是秒數或 HTTP-date；解析失敗回 0。
-export function retryAfterSeconds(value) {
-  if (!value) return 0;
-  const n = Number(value);
-  if (Number.isFinite(n)) return n;
-  const t = Date.parse(value);
-  return Number.isNaN(t) ? 0 : Math.max(0, Math.round((t - Date.now()) / 1000));
-}
-
-// POST otp/create/ 回應分流。429 依 Retry-After：≥ 1 小時 → 今天用完（C-5）。
-export function otpCreateRoute({ httpStatus, body, header }) {
-  body = body || {};
-  if (httpStatus === 201) return { action: "sent", token: body.token, phoneMasked: body.phone_masked };
-  if (httpStatus === 403 && body.code === "user_banned") return { action: "banned", message: BANNED_COPY };
-  if (httpStatus === 429) {
-    const secs = retryAfterSeconds(header ? header("Retry-After") : null);
-    return {
-      action: "error",
-      message: secs >= 3600 ? "今天的驗證次數用完了，明天再試，或在 LINE 找我們" : "請稍後再試",
-      reason: "rate_limited",
-    };
-  }
-  if (httpStatus === 400 && Array.isArray(body.phone_number)) return { action: "error", message: body.phone_number[0] };
-  return { action: "error", message: body.detail || GENERIC_ERROR };
-}
+// create／verify 的錯誤分流在 lib/otp.js（與下午茶報名共用）；這裡 re-export 給既有呼叫端與測試。
+export { BANNED_COPY, retryAfterSeconds, otpCreateRoute };
 
 // verify 回應 → B-3 分支：standard→b、premium→c、new→d、其餘→a。
 export function branchOf(body) {
@@ -84,25 +65,18 @@ export function branchOf(body) {
   return "a";
 }
 
-// POST otp/verify/ 回應分流。otp_max_attempts 只提示重送（後端無 30 分鎖，別假裝有）。
+// POST otp/verify/ 回應分流：錯誤走共用分流；200 另外帶出 KOL 要的會員資訊。
 export function otpVerifyRoute({ httpStatus, body }) {
-  body = body || {};
-  if (httpStatus === 200) {
-    return {
-      action: "verified",
-      branch: branchOf(body),
-      checkoutToken: body.checkout_token,
-      userState: body.user_state,
-      displayName: body.display_name,
-      membership: body.membership,
-      projectedExpireAt: body.projected_expire_at,
-    };
-  }
-  if (httpStatus === 403 && body.code === "user_banned") return { action: "banned", message: BANNED_COPY };
-  if (body.code === "otp_expired") return { action: "error", message: "驗證碼已過期，請重新傳送", reason: "expired", resend: true };
-  if (body.code === "otp_max_attempts") return { action: "error", message: "錯誤次數過多，請重新傳送驗證碼", reason: "wrong", resend: true };
-  if (body.code === "otp_invalid") return { action: "error", message: body.detail || "驗證碼錯誤", reason: "wrong", resend: false };
-  return { action: "error", message: body.detail || GENERIC_ERROR, reason: "wrong", resend: false };
+  const r = baseOtpVerifyRoute({ httpStatus, body });
+  if (r.action !== "verified") return r;
+  return {
+    ...r,
+    branch: branchOf(body),
+    userState: body.user_state,
+    displayName: body.display_name,
+    membership: body.membership,
+    projectedExpireAt: body.projected_expire_at,
+  };
 }
 
 // ---- 步驟二：方案 ----
@@ -172,7 +146,8 @@ export function prevExpireRecord(verify, orderId) {
 // POST orders/ 回應分流（api.md §2.5 / §5）。200 三種形狀：paid / pending+redirect（3DS）/ pending 無 redirect（輪詢）。
 export function orderRoute({ httpStatus, body }) {
   body = body || {};
-  const ids = { orderId: body.merchant_order_id, userId: body.user_id };
+  // orderId＝流水號（顯示／比對原到期日用）；orderToken＝完成頁網址 ?order= 用（流水號可猜，後端只接受 token）
+  const ids = { orderId: body.merchant_order_id, orderToken: body.order_token, userId: body.user_id };
   if (httpStatus === 200) {
     if (body.status === "paid") return { action: "done", ...ids };
     if (body.redirect_url) return { action: "redirect", url: body.redirect_url, ...ids };
@@ -189,7 +164,7 @@ export function orderRoute({ httpStatus, body }) {
     case "consent_required":
       return { action: "back_step3", message: body.detail || "請勾選兩項同意條款" };
     case "order_pending":
-      return body.merchant_order_id ? { action: "poll", ...ids } : { action: "error", message: body.detail || GENERIC_ERROR };
+      return body.order_token ? { action: "poll", ...ids } : { action: "error", message: body.detail || GENERIC_ERROR };
     case "payment_declined":
       return { action: "declined", message: DECLINED_COPY };
     case "payment_error":
@@ -698,7 +673,7 @@ async function initKolCheckout() {
       switch (r.action) {
         case "done":
         case "poll":
-          window.location.href = `${SUCCESS_PATH}?order=${encodeURIComponent(r.orderId)}`;
+          window.location.href = `${SUCCESS_PATH}?order=${encodeURIComponent(r.orderToken)}`;
           return;
         case "redirect":
           window.location.href = r.url;

@@ -234,16 +234,16 @@ describe("buildOrderPayload", () => {
 });
 
 describe("orderRoute", () => {
-  const base = { merchant_order_id: "KOL-20260915-001", amount: 2400, user_id: 123 };
+  const base = { merchant_order_id: "KOL-20260915-001", order_token: "9b2f6c1e-0000-4000-8000-000000000001", amount: 2400, user_id: 123 };
   it("200 paid → done", () =>
     expect(orderRoute({ httpStatus: 200, body: { ...base, status: "paid", expire_at: "2026-12-14T05:00:00Z" } }))
-      .toEqual({ action: "done", orderId: "KOL-20260915-001", userId: 123 }));
+      .toEqual({ action: "done", orderId: "KOL-20260915-001", orderToken: "9b2f6c1e-0000-4000-8000-000000000001", userId: 123 }));
   it("200 pending + redirect_url → redirect（3DS）", () =>
     expect(orderRoute({ httpStatus: 200, body: { ...base, status: "pending_payment", redirect_url: "https://91app/3ds" } }))
-      .toEqual({ action: "redirect", url: "https://91app/3ds", orderId: "KOL-20260915-001", userId: 123 }));
+      .toEqual({ action: "redirect", url: "https://91app/3ds", orderId: "KOL-20260915-001", orderToken: "9b2f6c1e-0000-4000-8000-000000000001", userId: 123 }));
   it("200 pending 無 redirect → poll", () =>
     expect(orderRoute({ httpStatus: 200, body: { ...base, status: "pending_payment" } }))
-      .toEqual({ action: "poll", orderId: "KOL-20260915-001", userId: 123 }));
+      .toEqual({ action: "poll", orderId: "KOL-20260915-001", orderToken: "9b2f6c1e-0000-4000-8000-000000000001", userId: 123 }));
   it("401 token 過期/無效 → back_step1", () => {
     for (const code of ["checkout_token_expired", "checkout_token_invalid"]) {
       expect(orderRoute({ httpStatus: 401, body: { code, detail: "d" } })).toEqual({ action: "back_step1", message: "d" });
@@ -254,8 +254,11 @@ describe("orderRoute", () => {
     expect(orderRoute({ httpStatus: 400, body: { code: "terms_outdated", detail: "條款已更新" } })).toEqual({ action: "terms_outdated", message: "條款已更新" });
     expect(orderRoute({ httpStatus: 400, body: { code: "consent_required", detail: "請勾選" } })).toEqual({ action: "back_step3", message: "請勾選" });
   });
-  it("409 order_pending 帶單號 → poll；不帶 → error", () => {
-    expect(orderRoute({ httpStatus: 409, body: { code: "order_pending", merchant_order_id: "KOL-1" } })).toEqual({ action: "poll", orderId: "KOL-1", userId: undefined });
+  it("409 order_pending 帶 order_token → poll；只帶流水號或都不帶 → error", () => {
+    expect(orderRoute({ httpStatus: 409, body: { code: "order_pending", merchant_order_id: "KOL-1", order_token: "tok" } }))
+      .toEqual({ action: "poll", orderId: "KOL-1", orderToken: "tok", userId: undefined });
+    expect(orderRoute({ httpStatus: 409, body: { code: "order_pending", merchant_order_id: "KOL-1", detail: "已有進行中的訂單" } }))
+      .toEqual({ action: "error", message: "已有進行中的訂單" });
     expect(orderRoute({ httpStatus: 409, body: { code: "order_pending", detail: "已有進行中的訂單" } })).toEqual({ action: "error", message: "已有進行中的訂單" });
   });
   it("payment_declined → declined（留步驟三）；payment_error → error 稍後再試", () => {
