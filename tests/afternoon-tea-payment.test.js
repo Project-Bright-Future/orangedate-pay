@@ -11,6 +11,8 @@ import {
   normalizeGender,
   normalizePricingPlan,
   validateForm,
+  otpApiBase,
+  isCheckoutTokenError,
 } from "../src/afternoon-tea-payment.js";
 
 const sampleForm = {
@@ -28,10 +30,10 @@ const sampleForm = {
 };
 
 describe("buildQuotePayload", () => {
-  it("只取 quote 需要的欄位", () => {
-    expect(buildQuotePayload(sampleForm)).toEqual({
+  it("帶 checkout_token、不帶手機（後端從 token 取驗證過的手機）", () => {
+    expect(buildQuotePayload(sampleForm, "ck_1")).toEqual({
       session_id: 1,
-      phone: "0912345678",
+      checkout_token: "ck_1",
       pricing_plan: "verified",
     });
   });
@@ -39,8 +41,10 @@ describe("buildQuotePayload", () => {
 
 describe("buildRegistrationPayload", () => {
   it("帶入 txn_token 並保留所有報名欄位", () => {
-    const out = buildRegistrationPayload(sampleForm, "tok_abc");
+    const out = buildRegistrationPayload(sampleForm, "tok_abc", "ck_1");
     expect(out.txn_token).toBe("tok_abc");
+    expect(out.checkout_token).toBe("ck_1");
+    expect(out).not.toHaveProperty("phone");
     expect(out.session_id).toBe(1);
     expect(out.email).toBe("ming@example.com");
     expect(out.pricing_plan).toBe("verified");
@@ -63,10 +67,10 @@ describe("routeRegistrationResponse", () => {
 
   it("status=confirmed 且無 redirect → 成功頁（帶 order）", () => {
     const r = routeRegistrationResponse(
-      { status: "confirmed", merchant_order_id: "TEA-1" },
+      { status: "confirmed", merchant_order_id: "TEA-1", order_token: "tok-1" },
       200
     );
-    expect(r).toEqual({ action: "success", orderId: "TEA-1" });
+    expect(r).toEqual({ action: "success", orderToken: "tok-1" });
   });
 
   it("HTTP 400 → 顯示後端 error 訊息", () => {
@@ -189,14 +193,12 @@ describe("normalizePricingPlan", () => {
 });
 
 describe("canAutoQuote", () => {
-  it("有場次且手機滿 10 碼 → 可自動試算", () =>
-    expect(canAutoQuote({ session_id: 1, phone: "0912345678" })).toBe(true));
+  it("有場次且手機已驗證 → 可自動試算", () =>
+    expect(canAutoQuote({ session_id: 1, phone: "0912345678" }, "ck_1")).toBe(true));
   it("尚未選場次 → 不試算", () =>
-    expect(canAutoQuote({ session_id: null, phone: "0912345678" })).toBe(false));
-  it("手機未滿 10 碼 → 不試算", () =>
-    expect(canAutoQuote({ session_id: 1, phone: "0912" })).toBe(false));
-  it("手機含非數字仍以數字位數判斷", () =>
-    expect(canAutoQuote({ session_id: 1, phone: "0912-345-678" })).toBe(true));
+    expect(canAutoQuote({ session_id: null, phone: "0912345678" }, "ck_1")).toBe(false));
+  it("手機還沒驗證 → 不試算", () =>
+    expect(canAutoQuote({ session_id: 1, phone: "0912345678" }, "")).toBe(false));
 });
 
 describe("validateForm", () => {
@@ -208,4 +210,28 @@ describe("validateForm", () => {
   it("缺場次", () => expect(validateForm({ ...valid, session_id: null })).toContain("請選擇場次"));
   it("缺手機", () => expect(validateForm({ ...valid, phone: "" })).toContain("請填寫手機"));
   it("email 格式錯", () => expect(validateForm({ ...valid, email: "bad" })).toContain("Email 格式不正確"));
+});
+
+describe("routeRegistrationResponse：手機驗證失效", () => {
+  it("401 checkout_token_expired → 要重新驗證", () =>
+    expect(routeRegistrationResponse({ code: "checkout_token_expired", error: "手機驗證已逾時，請重新驗證" }, 401))
+      .toEqual({ action: "reverify", message: "手機驗證已逾時，請重新驗證" }));
+});
+
+describe("isCheckoutTokenError", () => {
+  it("401 + checkout_token_* → true", () => {
+    expect(isCheckoutTokenError(401, { code: "checkout_token_invalid" })).toBe(true);
+    expect(isCheckoutTokenError(401, { code: "checkout_token_expired" })).toBe(true);
+  });
+  it("其他錯誤 → false", () => {
+    expect(isCheckoutTokenError(400, { error: "此場次已關閉報名" })).toBe(false);
+    expect(isCheckoutTokenError(401, {})).toBe(false);
+  });
+});
+
+describe("otpApiBase", () => {
+  it("由 event 的 apiBase 推出 KOL OTP 的 base", () => {
+    expect(otpApiBase("https://api3.orangedate.com/api/pbf-event")).toBe("https://api3.orangedate.com/api/pbf-kol");
+    expect(otpApiBase("https://dev-api.orangedate.com/api/pbf-event/")).toBe("https://dev-api.orangedate.com/api/pbf-kol");
+  });
 });

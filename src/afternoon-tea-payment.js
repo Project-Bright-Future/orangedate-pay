@@ -1,21 +1,24 @@
 import { createApi } from "./lib/api.js";
 import { createCard91 } from "./lib/card91.js";
+import { otpCreateRoute, otpVerifyRoute } from "./lib/otp.js";
 
-export function buildQuotePayload(form) {
+// 價格依手機的會員身分決定 → 手機要先經 OTP 驗證，quote／報名一律帶 checkout_token、不帶手機號碼
+// （後端從 token 取驗證過的手機；否則輸入別人的會員手機就能拿會員價）。
+export function buildQuotePayload(form, checkoutToken) {
   return {
     session_id: form.session_id,
-    phone: form.phone,
+    checkout_token: checkoutToken || "",
     pricing_plan: form.pricing_plan || "general",
   };
 }
 
-export function buildRegistrationPayload(form, txnToken) {
+export function buildRegistrationPayload(form, txnToken, checkoutToken) {
   return {
     session_id: form.session_id,
     name: form.name,
     gender: form.gender,
     age: form.age ?? null,
-    phone: form.phone,
+    checkout_token: checkoutToken || "",
     email: form.email,
     nickname: form.nickname || "",
     occupation_category: form.occupation_category || "",
@@ -26,8 +29,22 @@ export function buildRegistrationPayload(form, txnToken) {
   };
 }
 
+// 401 + checkout_token_*：手機驗證逾時／無效 → 要重新驗證手機。
+export function isCheckoutTokenError(httpStatus, body) {
+  const code = body && body.code;
+  return httpStatus === 401 && (code === "checkout_token_expired" || code === "checkout_token_invalid");
+}
+
+// OTP 端點在 KOL app（/api/pbf-kol/otp/）；預設由 event 的 apiBase 推出來。
+export function otpApiBase(eventBase) {
+  return String(eventBase || "").replace(/\/pbf-event\/?$/, "/pbf-kol");
+}
+
 export function routeRegistrationResponse(res, httpStatus) {
   res = res || {};
+  if (isCheckoutTokenError(httpStatus, res)) {
+    return { action: "reverify", message: res.error || "手機驗證已失效，請重新驗證" };
+  }
   if (httpStatus >= 400) {
     return { action: "error", message: res.error || "系統忙線中，請稍後再試" };
   }
@@ -35,8 +52,9 @@ export function routeRegistrationResponse(res, httpStatus) {
     return { action: "redirect", url: res.redirect_url };
   }
   // confirmed 或 pending_payment（無 redirect）一律導去成功頁，
-  // 由成功頁輪詢 status 端點確認最終結果（含 failed/expired）
-  return { action: "success", orderId: res.merchant_order_id };
+  // 由成功頁輪詢 status 端點確認最終結果（含 failed/expired）。
+  // 網址帶 order_token：流水號可猜，後端 status 只接受 token。
+  return { action: "success", orderToken: res.order_token };
 }
 
 const PLAN_LABELS = {
@@ -111,11 +129,9 @@ export function normalizePricingPlan(raw) {
   return "general";
 }
 
-// 是否已具備自動試算的最小條件：選了場次、手機數字滿 10 碼。
-// （金額由場次/手機/方案決定，這兩項齊了才值得打 /quote/。）
-export function canAutoQuote(form) {
-  const digits = String(form.phone || "").replace(/\D/g, "");
-  return !!form.session_id && digits.length >= 10;
+// 是否已具備自動試算的最小條件：選了場次、手機已驗證（拿到 checkout_token）。
+export function canAutoQuote(form, checkoutToken) {
+  return !!form.session_id && !!checkoutToken;
 }
 
 export function validateForm(form) {
@@ -152,6 +168,9 @@ const PUBLISHABLE_KEY = CFG.publishableKey || "";
 const SDK_ENV = CFG.env || "sandbox";
 
 const api = createApi(API_BASE);
+// OTP 端點在 KOL app；可用 window.OD_PAYMENT.otpApiBase 覆寫
+const otpApi = createApi(CFG.otpApiBase || otpApiBase(API_BASE));
+const OTP_COOLDOWN_SECONDS = 60;
 
 // 左：後端契約欄位 → 右：Webflow 表單實際 name（2026-05-24 於 Designer 確認）。
 // 採 JS 對應表而非改 Webflow 欄位名，避免動到原生表單欄位、且集中一處易維護。
@@ -282,14 +301,60 @@ function setCardVisible(visible) {
   if (el) el.style.display = visible ? "" : "none";
 }
 
+// ---- 手機驗證（OTP）----
+// 在 Webflow 原生手機欄位下方插入「傳送驗證碼 → 輸入驗證碼」，Webflow 版面不用改。
+// 按鈕一律 type=button，避免觸發表單送出；驗證碼欄位沒有 name，不會進 Webflow 的表單通知。
+function injectOtpStyles() {
+  if (document.getElementById("od-otp-styles")) return;
+  const style = document.createElement("style");
+  style.id = "od-otp-styles";
+  style.textContent = `
+    .od-otp { margin: 8px 0 16px; }
+    .od-otp-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .od-otp-row input { flex: 1 1 160px; min-width: 0; padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; }
+    .od-otp-btn { padding: 8px 16px; border: 0; border-radius: 8px; background: #ff6b35; color: #fff; font-weight: 600; cursor: pointer; }
+    .od-otp-btn:disabled { background: #ccc; cursor: default; }
+    .od-otp-msg { margin: 6px 0 0; font-size: .9rem; color: #666; min-height: 1.2em; }
+    .od-otp-msg.od-ok { color: #2e7d32; }
+    .od-otp-msg.od-err { color: #d32f2f; }
+  `;
+  document.head.appendChild(style);
+}
+
+function mountOtp(phoneInput) {
+  injectOtpStyles();
+  const box = document.createElement("div");
+  box.className = "od-otp";
+  box.innerHTML = `
+    <div class="od-otp-row"><button type="button" id="od-otp-send" class="od-otp-btn">傳送驗證碼</button></div>
+    <div class="od-otp-row" id="od-otp-block" hidden>
+      <input id="od-otp-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="輸入 6 碼驗證碼" aria-label="驗證碼 6 碼">
+      <button type="button" id="od-otp-verify" class="od-otp-btn">驗證</button>
+    </div>
+    <p id="od-otp-msg" class="od-otp-msg" role="status"></p>`;
+  phoneInput.insertAdjacentElement("afterend", box);
+  return {
+    send: box.querySelector("#od-otp-send"),
+    block: box.querySelector("#od-otp-block"),
+    code: box.querySelector("#od-otp-code"),
+    verify: box.querySelector("#od-otp-verify"),
+    msg: box.querySelector("#od-otp-msg"),
+  };
+}
+
+function setOtpMsg(ui, text, kind) {
+  ui.msg.textContent = text || "";
+  ui.msg.className = "od-otp-msg" + (kind ? ` od-${kind}` : "");
+}
+
 // 91APP 卡片欄位 glue 見 lib/card91.js（setup / mount 皆只做一次）。
 let card = null;
 function mountCardFields() {
   if (card) card.mount();
 }
 
-// 步驟一：試算金額。回傳 { form, quote }，失敗回 null。
-async function runQuote(formEl) {
+// 步驟一：試算金額。回傳 { form, quote }，失敗回 null；手機驗證失效時呼叫 onTokenError。
+async function runQuote(formEl, checkoutToken, onTokenError) {
   const form = readForm(formEl);
   const errors = validateForm(form);
   if (errors.length) { showErrors(errors); return null; }
@@ -297,8 +362,12 @@ async function runQuote(formEl) {
 
   const quoteRes = await api("/quote/", {
     method: "POST",
-    body: JSON.stringify(buildQuotePayload(form)),
+    body: JSON.stringify(buildQuotePayload(form, checkoutToken)),
   });
+  if (isCheckoutTokenError(quoteRes.httpStatus, quoteRes.body)) {
+    onTokenError(quoteRes.body.error);
+    return null;
+  }
   if (quoteRes.httpStatus >= 400) {
     showErrors([quoteRes.body && quoteRes.body.error ? quoteRes.body.error : "試算失敗，請稍後再試"]);
     return null;
@@ -316,7 +385,7 @@ async function runQuote(formEl) {
 }
 
 // 步驟二：確認付款。付費方案才取 txnToken（90 秒有效，當下才取），空 token＝卡號未填對。
-async function submitRegistration(form, quote) {
+async function submitRegistration(form, quote, checkoutToken, onTokenError) {
   let txnToken = "";
   if (quote.needsCard) {
     txnToken = card ? await card.getTxnToken() : "";
@@ -328,14 +397,16 @@ async function submitRegistration(form, quote) {
 
   const regRes = await api("/registrations/", {
     method: "POST",
-    body: JSON.stringify(buildRegistrationPayload(form, txnToken)),
+    body: JSON.stringify(buildRegistrationPayload(form, txnToken, checkoutToken)),
   });
 
   const route = routeRegistrationResponse(regRes.body, regRes.httpStatus);
   if (route.action === "redirect") {
     window.location.href = route.url;
   } else if (route.action === "success") {
-    window.location.href = `/afternoon-tea-payment-success?order=${route.orderId}`;
+    window.location.href = `/afternoon-tea-payment-success?order=${encodeURIComponent(route.orderToken)}`;
+  } else if (route.action === "reverify") {
+    onTokenError(route.message);
   } else {
     showErrors([route.message]);
   }
@@ -382,6 +453,10 @@ async function initPaymentFlow() {
   let current = null; // { form, quote }
   let busy = false;
   let quoteTimer = null;
+  // 手機驗證狀態：verifiedPhone 是拿到 checkoutToken 時的號碼；號碼一改就作廢
+  const otp = { token: "", phone: "", checkoutToken: "", verifiedPhone: "", cooldownTimer: null };
+  const phoneInput = formEl.querySelector(`[name="${FIELD_NAME_MAP.phone}"]`);
+  const otpUi = phoneInput ? mountOtp(phoneInput) : null;
   const submitBtn = formEl.querySelector("[type=submit]");
   const initialLabel = submitBtn ? (submitBtn.tagName === "INPUT" ? submitBtn.value : submitBtn.textContent) : "";
   if (submitBtn) submitBtn.disabled = true; // 試算完成前不可送出
@@ -396,11 +471,114 @@ async function initPaymentFlow() {
     setCardVisible(false);
   }
 
+  function resetVerification(message) {
+    otp.checkoutToken = "";
+    otp.verifiedPhone = "";
+    otp.token = "";
+    if (!otpUi) return;
+    otpUi.block.hidden = true;
+    otpUi.code.value = "";
+    if (!otp.cooldownTimer) {
+      otpUi.send.disabled = false;
+      otpUi.send.textContent = "傳送驗證碼";
+    }
+    setOtpMsg(otpUi, message || "", message ? "err" : "");
+  }
+
+  function onTokenError(message) {
+    invalidateQuote();
+    resetVerification(message || "手機驗證已失效，請重新驗證");
+  }
+
+  function startCooldown() {
+    let left = OTP_COOLDOWN_SECONDS;
+    otpUi.send.disabled = true;
+    otpUi.send.textContent = `重新傳送（${left}）`;
+    otp.cooldownTimer = setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(otp.cooldownTimer);
+        otp.cooldownTimer = null;
+        otpUi.send.disabled = !!otp.checkoutToken;
+        otpUi.send.textContent = otp.checkoutToken ? "已驗證" : "重新傳送";
+      } else if (!otp.checkoutToken) {
+        otpUi.send.textContent = `重新傳送（${left}）`;
+      }
+    }, 1000);
+  }
+
+  async function sendOtp() {
+    const phone = String(phoneInput.value || "").trim();
+    if (!phone) { setOtpMsg(otpUi, "請先填寫手機", "err"); return; }
+    otpUi.send.disabled = true;
+    try {
+      const r = otpCreateRoute(await otpApi("/otp/create/", {
+        method: "POST",
+        body: JSON.stringify({ phone_number: phone }),
+      }));
+      if (r.action === "sent") {
+        otp.token = r.token;
+        otp.phone = phone;
+        otpUi.block.hidden = false;
+        otpUi.code.value = "";
+        otpUi.code.focus();
+        setOtpMsg(otpUi, `驗證碼已傳送到 ${r.phoneMasked || phone}`, "ok");
+        startCooldown();
+      } else {
+        setOtpMsg(otpUi, r.message, "err");
+        otpUi.send.disabled = false;
+      }
+    } catch (err) {
+      console.error("otp/create", err);
+      setOtpMsg(otpUi, "系統忙線中，請稍後再試", "err");
+      otpUi.send.disabled = false;
+    }
+  }
+
+  async function verifyOtp() {
+    const code = String(otpUi.code.value || "").replace(/\D/g, "");
+    if (!otp.token || code.length < 4) { setOtpMsg(otpUi, "請輸入簡訊中的驗證碼", "err"); return; }
+    otpUi.verify.disabled = true;
+    try {
+      const r = otpVerifyRoute(await otpApi("/otp/verify/", {
+        method: "POST",
+        body: JSON.stringify({ phone_number: otp.phone, otp: code, token: otp.token }),
+      }));
+      if (r.action === "verified") {
+        otp.checkoutToken = r.checkoutToken;
+        otp.verifiedPhone = otp.phone;
+        otpUi.block.hidden = true;
+        otpUi.send.disabled = true;
+        otpUi.send.textContent = "已驗證";
+        setOtpMsg(otpUi, "手機已驗證", "ok");
+        maybeQuote();
+      } else {
+        if (r.resend) otpUi.block.hidden = true;
+        setOtpMsg(otpUi, r.message, "err");
+      }
+    } catch (err) {
+      console.error("otp/verify", err);
+      setOtpMsg(otpUi, "系統忙線中，請稍後再試", "err");
+    } finally {
+      otpUi.verify.disabled = false;
+    }
+  }
+
+  if (otpUi) {
+    otpUi.send.addEventListener("click", sendOtp);
+    otpUi.verify.addEventListener("click", verifyOtp);
+    otpUi.code.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); verifyOtp(); } // 別讓 Enter 送出整張表單
+    });
+  } else {
+    console.error("找不到手機欄位，無法驗證手機");
+  }
+
   async function doQuote() {
     if (busy) return;
     busy = true;
     try {
-      current = await runQuote(formEl);
+      current = await runQuote(formEl, otp.checkoutToken, onTokenError);
       if (submitBtn) {
         submitBtn.disabled = !current;
         if (current) {
@@ -418,13 +596,18 @@ async function initPaymentFlow() {
   // 欄位齊了才自動試算；用防抖避免每次按鍵都打 API。
   function maybeQuote() {
     const form = readForm(formEl);
-    if (!canAutoQuote(form)) return;
+    if (!canAutoQuote(form, otp.checkoutToken)) return;
     clearTimeout(quoteTimer);
     quoteTimer = setTimeout(() => { doQuote(); }, 500);
   }
 
   // 任一欄位變動（含改場次）→ 先讓舊 quote 失效，再排程重算。
-  function onFieldChange() {
+  // 改了手機號碼 → 之前的驗證作廢（驗證碼欄位自己的輸入不算）。
+  function onFieldChange(e) {
+    if (otpUi && e && e.target === otpUi.code) return;
+    if (phoneInput && otp.verifiedPhone && String(phoneInput.value || "").trim() !== otp.verifiedPhone) {
+      resetVerification("");
+    }
     invalidateQuote();
     maybeQuote();
   }
@@ -437,7 +620,7 @@ async function initPaymentFlow() {
     busy = true;
     if (submitBtn) submitBtn.disabled = true;
     try {
-      await submitRegistration(current.form, current.quote);
+      await submitRegistration(current.form, current.quote, otp.checkoutToken, onTokenError);
     } finally {
       busy = false;
       if (submitBtn) submitBtn.disabled = false;
