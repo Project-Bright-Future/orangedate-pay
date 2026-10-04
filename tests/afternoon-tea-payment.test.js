@@ -13,6 +13,8 @@ import {
   validateForm,
   otpApiBase,
   isCheckoutTokenError,
+  otpSendButtonState,
+  OTP_STYLES,
 } from "../src/afternoon-tea-payment.js";
 
 const sampleForm = {
@@ -233,5 +235,30 @@ describe("otpApiBase", () => {
   it("由 event 的 apiBase 推出 KOL OTP 的 base", () => {
     expect(otpApiBase("https://api3.orangedate.com/api/pbf-event")).toBe("https://api3.orangedate.com/api/pbf-kol");
     expect(otpApiBase("https://dev-api.orangedate.com/api/pbf-event/")).toBe("https://dev-api.orangedate.com/api/pbf-kol");
+  });
+});
+
+describe("otpSendButtonState", () => {
+  it("還沒傳過：可按、顯示「傳送驗證碼」", () => {
+    expect(otpSendButtonState({ verified: false, cooldownLeft: 0, sent: false })).toEqual({ disabled: false, text: "傳送驗證碼" });
+  });
+  it("冷卻中：停用、顯示倒數", () => {
+    expect(otpSendButtonState({ verified: false, cooldownLeft: 42, sent: true })).toEqual({ disabled: true, text: "重新傳送（42）" });
+  });
+  it("驗證後改號碼、冷卻還沒結束：顯示倒數，不是「已驗證」", () => {
+    expect(otpSendButtonState({ verified: false, cooldownLeft: 30, sent: false })).toEqual({ disabled: true, text: "重新傳送（30）" });
+  });
+  it("冷卻結束、傳過但還沒驗證：可按、顯示「重新傳送」", () => {
+    expect(otpSendButtonState({ verified: false, cooldownLeft: 0, sent: true })).toEqual({ disabled: false, text: "重新傳送" });
+  });
+  it("已驗證：停用、顯示「已驗證」（冷卻中也一樣）", () => {
+    expect(otpSendButtonState({ verified: true, cooldownLeft: 10, sent: true })).toEqual({ disabled: true, text: "已驗證" });
+    expect(otpSendButtonState({ verified: true, cooldownLeft: 0, sent: true })).toEqual({ disabled: true, text: "已驗證" });
+  });
+});
+
+describe("OTP_STYLES", () => {
+  it("帶 hidden 屬性的列要隱藏（不能被 display:flex 蓋掉）", () => {
+    expect(OTP_STYLES).toMatch(/\.od-otp-row\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
   });
 });
