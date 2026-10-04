@@ -91,3 +91,11 @@ describe("resultRedirectTarget", () => {
   it("pending（未終態）不導向", () =>
     expect(resultRedirectTarget("pending_payment", "/afternoon-tea-payment-success")).toBeNull());
 });
+
+describe("resultRedirectTarget（自訂頁面）", () => {
+  const paths = { successPath: "/workshop-payment-success", failPath: "/workshop-payment-fail" };
+  it("工作坊成功頁收到失敗 → 導去工作坊失敗頁", () =>
+    expect(resultRedirectTarget("failed", "/workshop-payment-success", paths)).toBe("/workshop-payment-fail"));
+  it("工作坊失敗頁收到 confirmed → 導回工作坊成功頁", () =>
+    expect(resultRedirectTarget("confirmed", "/workshop-payment-fail", paths)).toBe("/workshop-payment-success"));
+});
