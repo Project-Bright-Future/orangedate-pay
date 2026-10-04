@@ -28,16 +28,20 @@ export function statusLabel(status) {
   return STATUS_LABELS[status] || status;
 }
 
-const SUCCESS_PATH = "/afternoon-tea-payment-success";
-const FAIL_PATH = "/afternoon-tea-payment-fail";
+const DEFAULT_PATHS = {
+  successPath: "/afternoon-tea-payment-success",
+  failPath: "/afternoon-tea-payment-fail",
+};
 
 // 3DS 一律導回成功頁；依輪詢到的真實狀態決定要不要互導到正確的頁。
 // 回傳要導向的路徑，或 null（留在原頁）。只在終態時導向，pending/timeout 不動。
-export function resultRedirectTarget(status, currentPath) {
+// paths：各活動頁自己的成功／失敗頁（預設＝下午茶）。
+export function resultRedirectTarget(status, currentPath, paths = {}) {
+  const { successPath, failPath } = { ...DEFAULT_PATHS, ...paths };
   const onFail = String(currentPath || "").includes("payment-fail");
-  if (status === "confirmed") return onFail ? SUCCESS_PATH : null;
+  if (status === "confirmed") return onFail ? successPath : null;
   if (status === "failed" || status === "expired" || status === "cancelled") {
-    return onFail ? null : FAIL_PATH;
+    return onFail ? null : failPath;
   }
   return null;
 }
@@ -92,7 +96,10 @@ async function initResultPage() {
   if (!orderId) return;
   const final = await pollStatus(orderId, fetchStatus, { intervalMs: 2000, maxAttempts: 15 });
   // 若落在不符狀態的頁面（如 3DS 失敗卻在成功頁），導去正確的結果頁。
-  const target = resultRedirectTarget(final.status, window.location.pathname);
+  const target = resultRedirectTarget(final.status, window.location.pathname, {
+    successPath: CFG.successPath || DEFAULT_PATHS.successPath,
+    failPath: CFG.failPath || DEFAULT_PATHS.failPath,
+  });
   if (target) {
     window.location.replace(`${target}?order=${encodeURIComponent(orderId)}`);
     return;

@@ -262,3 +262,43 @@ describe("OTP_STYLES", () => {
     expect(OTP_STYLES).toMatch(/\.od-otp-row\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
   });
 });
+
+describe("固定價場次（工作坊，phoneOtp:false）", () => {
+  const opts = { phoneOtp: false };
+  it("quote 不驗手機時帶 phone", () => {
+    expect(buildQuotePayload(sampleForm, "", opts)).toEqual({
+      session_id: 1,
+      checkout_token: "",
+      pricing_plan: "verified",
+      phone: "0912345678",
+    });
+  });
+  it("報名不驗手機時帶 phone", () => {
+    expect(buildRegistrationPayload(sampleForm, "tok", "", opts).phone).toBe("0912345678");
+  });
+  it("預設（下午茶）不帶 phone", () => {
+    expect(buildQuotePayload(sampleForm, "ck_1")).not.toHaveProperty("phone");
+  });
+  it("不驗手機：選了場次＋填了手機就能試算", () => {
+    expect(canAutoQuote({ session_id: 1, phone: "0912345678" }, "", opts)).toBe(true);
+    expect(canAutoQuote({ session_id: 1, phone: " " }, "", opts)).toBe(false);
+    expect(canAutoQuote({ session_id: null, phone: "0912345678" }, "", opts)).toBe(false);
+  });
+  it("固定價文案不提會員方案", () => {
+    expect(formatQuoteResult({ plan: "general", amount: 600 }, { fixedPrice: true })).toEqual({
+      needsCard: true,
+      amount: 600,
+      message: "活動費用 NT$600。",
+    });
+  });
+  it("有總名額的場次卡片顯示總剩餘名額", () => {
+    const card = formatSessionCard({
+      id: 9, title: "手機拍出好影片", date: "2026-10-24",
+      start_time: "13:30:00", end_time: "16:30:00", location_name: "苗栗頭份",
+      remaining_male: 14, remaining_female: 14, is_male_open: true, is_female_open: true,
+      max_total: 14, remaining_total: 11,
+    });
+    expect(card.totalLabel).toBe("剩餘名額：11");
+    expect(card.soldOut).toBe(false);
+  });
+});

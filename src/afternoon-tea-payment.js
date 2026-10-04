@@ -4,16 +4,20 @@ import { otpCreateRoute, otpVerifyRoute } from "./lib/otp.js";
 
 // 價格依手機的會員身分決定 → 手機要先經 OTP 驗證，quote／報名一律帶 checkout_token、不帶手機號碼
 // （後端從 token 取驗證過的手機；否則輸入別人的會員手機就能拿會員價）。
-export function buildQuotePayload(form, checkoutToken) {
-  return {
+// 例外：固定價場次（工作坊）沒有會員價可冒用 → 頁面設 phoneOtp:false，改帶 phone；
+// 後端只對有 price 的場次接受 phone，設錯也不會變成漏洞。
+export function buildQuotePayload(form, checkoutToken, { phoneOtp = true } = {}) {
+  const payload = {
     session_id: form.session_id,
     checkout_token: checkoutToken || "",
     pricing_plan: form.pricing_plan || "general",
   };
+  if (!phoneOtp) payload.phone = form.phone || "";
+  return payload;
 }
 
-export function buildRegistrationPayload(form, txnToken, checkoutToken) {
-  return {
+export function buildRegistrationPayload(form, txnToken, checkoutToken, { phoneOtp = true } = {}) {
+  const payload = {
     session_id: form.session_id,
     name: form.name,
     gender: form.gender,
@@ -27,6 +31,8 @@ export function buildRegistrationPayload(form, txnToken, checkoutToken) {
     pricing_plan: form.pricing_plan || "general",
     txn_token: txnToken || "",
   };
+  if (!phoneOtp) payload.phone = form.phone || "";
+  return payload;
 }
 
 // 401 + checkout_token_*：手機驗證逾時／無效 → 要重新驗證手機。
@@ -63,8 +69,12 @@ const PLAN_LABELS = {
   subscriber: "付費訂閱會員",
 };
 
-export function formatQuoteResult(quote) {
+// fixedPrice：場次有固定價（工作坊）→ 不提會員方案，只講活動費用。
+export function formatQuoteResult(quote, { fixedPrice = false } = {}) {
   const amount = quote.amount;
+  if (fixedPrice && amount > 0) {
+    return { needsCard: true, amount, message: `活動費用 NT$${amount}。` };
+  }
   if (amount === 0) {
     return {
       needsCard: false,
@@ -98,9 +108,10 @@ export function formatDeadline(isoString) {
 }
 
 // 把後端 GET /sessions/ 的單筆場次整理成卡片顯示用資料（純函式，免 DOM 可測）。
+// 有總名額（max_total）的場次另帶 totalLabel，卡片改顯示總剩餘名額、不分男女。
 export function formatSessionCard(session) {
   const hhmm = (t) => (t || "").slice(0, 5);
-  return {
+  const card = {
     id: session.id,
     title: session.title || "",
     timeLabel: `${session.date || ""} ${hhmm(session.start_time)}–${hhmm(session.end_time)}`,
@@ -110,6 +121,8 @@ export function formatSessionCard(session) {
     femaleLabel: `女生剩餘名額：${session.remaining_female}`,
     soldOut: !session.is_male_open && !session.is_female_open,
   };
+  if (session.max_total != null) card.totalLabel = `剩餘名額：${session.remaining_total}`;
+  return card;
 }
 
 // Webflow 性別 select 的值為 Male/Female；後端要小寫 male/female。未選回空字串。
@@ -129,9 +142,11 @@ export function normalizePricingPlan(raw) {
   return "general";
 }
 
-// 是否已具備自動試算的最小條件：選了場次、手機已驗證（拿到 checkout_token）。
-export function canAutoQuote(form, checkoutToken) {
-  return !!form.session_id && !!checkoutToken;
+// 是否已具備自動試算的最小條件：選了場次、手機已驗證（拿到 checkout_token）；
+// 不驗手機的頁面（phoneOtp:false）則是手機有填。
+export function canAutoQuote(form, checkoutToken, { phoneOtp = true } = {}) {
+  if (!form.session_id) return false;
+  return phoneOtp ? !!checkoutToken : !!String(form.phone || "").trim();
 }
 
 export function validateForm(form) {
@@ -162,10 +177,18 @@ export function revertWebflowFormUI(formEl) {
 // ---- Browser glue (skipped under vitest/node) ----
 // 設定值由 Webflow 頁面 custom code 的 window.OD_PAYMENT 帶入（publishableKey 放這、不進 git）：
 //   window.OD_PAYMENT = { publishableKey: "...", env: "sandbox"|"production", apiBase: "..." }
+// 同一支 JS 給多個活動頁用（預設值＝下午茶）：
+//   category：只列這個分類的場次（"tea"／"workshop"）
+//   successPath：付款完成頁
+//   phoneOtp：false＝不驗手機（只給固定價場次的頁面用）
 const CFG = (typeof window !== "undefined" && window.OD_PAYMENT) || {};
 const API_BASE = CFG.apiBase || "https://dev-api.orangedate.com/api/pbf-event";
 const PUBLISHABLE_KEY = CFG.publishableKey || "";
 const SDK_ENV = CFG.env || "sandbox";
+const CATEGORY = CFG.category || "tea";
+const SUCCESS_PATH = CFG.successPath || "/afternoon-tea-payment-success";
+const PHONE_OTP = CFG.phoneOtp !== false;
+const PAYLOAD_OPTS = { phoneOtp: PHONE_OTP };
 
 const api = createApi(API_BASE);
 // OTP 端點在 KOL app；可用 window.OD_PAYMENT.otpApiBase 覆寫
@@ -249,12 +272,12 @@ function renderSessions(container, sessions, formEl, onSelect) {
 
     const counts = document.createElement("div");
     counts.className = "od-card-counts";
-    const male = document.createElement("span");
-    male.textContent = c.maleLabel;
-    const female = document.createElement("span");
-    female.textContent = c.femaleLabel;
-    counts.appendChild(male);
-    counts.appendChild(female);
+    const labels = c.totalLabel ? [c.totalLabel] : [c.maleLabel, c.femaleLabel];
+    labels.forEach((text) => {
+      const span = document.createElement("span");
+      span.textContent = text;
+      counts.appendChild(span);
+    });
 
     card.appendChild(title);
     card.appendChild(meta);
@@ -279,9 +302,13 @@ function renderSessions(container, sessions, formEl, onSelect) {
   });
 }
 
+// 載入的場次依 id 留著：試算時要知道選中的場次是不是固定價
+const sessionsById = new Map();
+
 async function loadSessions(formEl, onSelect) {
   const container = document.querySelector("#od-sessions");
-  const { body } = await api("/sessions/", { method: "GET" });
+  const { body } = await api(`/sessions/?category=${encodeURIComponent(CATEGORY)}`, { method: "GET" });
+  if (Array.isArray(body)) body.forEach((s) => sessionsById.set(s.id, s));
   if (container && Array.isArray(body)) renderSessions(container, body, formEl, onSelect);
   return body;
 }
@@ -373,7 +400,7 @@ async function runQuote(formEl, checkoutToken, onTokenError) {
 
   const quoteRes = await api("/quote/", {
     method: "POST",
-    body: JSON.stringify(buildQuotePayload(form, checkoutToken)),
+    body: JSON.stringify(buildQuotePayload(form, checkoutToken, PAYLOAD_OPTS)),
   });
   if (isCheckoutTokenError(quoteRes.httpStatus, quoteRes.body)) {
     onTokenError(quoteRes.body.error);
@@ -384,7 +411,8 @@ async function runQuote(formEl, checkoutToken, onTokenError) {
     return null;
   }
 
-  const quote = formatQuoteResult(quoteRes.body);
+  const session = sessionsById.get(form.session_id);
+  const quote = formatQuoteResult(quoteRes.body, { fixedPrice: !!session && session.price != null });
   showAmount(quote.message);
   if (quote.needsCard) {
     setCardVisible(true);
@@ -408,14 +436,14 @@ async function submitRegistration(form, quote, checkoutToken, onTokenError) {
 
   const regRes = await api("/registrations/", {
     method: "POST",
-    body: JSON.stringify(buildRegistrationPayload(form, txnToken, checkoutToken)),
+    body: JSON.stringify(buildRegistrationPayload(form, txnToken, checkoutToken, PAYLOAD_OPTS)),
   });
 
   const route = routeRegistrationResponse(regRes.body, regRes.httpStatus);
   if (route.action === "redirect") {
     window.location.href = route.url;
   } else if (route.action === "success") {
-    window.location.href = `/afternoon-tea-payment-success?order=${encodeURIComponent(route.orderToken)}`;
+    window.location.href = `${SUCCESS_PATH}?order=${encodeURIComponent(route.orderToken)}`;
   } else if (route.action === "reverify") {
     onTokenError(route.message);
   } else {
@@ -467,7 +495,7 @@ async function initPaymentFlow() {
   // 手機驗證狀態：verifiedPhone 是拿到 checkoutToken 時的號碼；號碼一改就作廢
   const otp = { token: "", phone: "", checkoutToken: "", verifiedPhone: "", cooldownTimer: null, cooldownLeft: 0 };
   const phoneInput = formEl.querySelector(`[name="${FIELD_NAME_MAP.phone}"]`);
-  const otpUi = phoneInput ? mountOtp(phoneInput) : null;
+  const otpUi = PHONE_OTP && phoneInput ? mountOtp(phoneInput) : null;
   const submitBtn = formEl.querySelector("[type=submit]");
   const initialLabel = submitBtn ? (submitBtn.tagName === "INPUT" ? submitBtn.value : submitBtn.textContent) : "";
   if (submitBtn) submitBtn.disabled = true; // 試算完成前不可送出
@@ -580,7 +608,7 @@ async function initPaymentFlow() {
     otpUi.code.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") { ev.preventDefault(); verifyOtp(); } // 別讓 Enter 送出整張表單
     });
-  } else {
+  } else if (PHONE_OTP) {
     console.error("找不到手機欄位，無法驗證手機");
   }
 
@@ -606,7 +634,7 @@ async function initPaymentFlow() {
   // 欄位齊了才自動試算；用防抖避免每次按鍵都打 API。
   function maybeQuote() {
     const form = readForm(formEl);
-    if (!canAutoQuote(form, otp.checkoutToken)) return;
+    if (!canAutoQuote(form, otp.checkoutToken, PAYLOAD_OPTS)) return;
     clearTimeout(quoteTimer);
     quoteTimer = setTimeout(() => { doQuote(); }, 500);
   }
