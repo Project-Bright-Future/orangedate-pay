@@ -304,13 +304,11 @@ function setCardVisible(visible) {
 // ---- 手機驗證（OTP）----
 // 在 Webflow 原生手機欄位下方插入「傳送驗證碼 → 輸入驗證碼」，Webflow 版面不用改。
 // 按鈕一律 type=button，避免觸發表單送出；驗證碼欄位沒有 name，不會進 Webflow 的表單通知。
-function injectOtpStyles() {
-  if (document.getElementById("od-otp-styles")) return;
-  const style = document.createElement("style");
-  style.id = "od-otp-styles";
-  style.textContent = `
+// .od-otp-row 設了 display:flex，會蓋掉瀏覽器內建的 [hidden]{display:none}，要明確補回來
+export const OTP_STYLES = `
     .od-otp { margin: 8px 0 16px; }
     .od-otp-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .od-otp-row[hidden] { display: none; }
     .od-otp-row input { flex: 1 1 160px; min-width: 0; padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; }
     .od-otp-btn { padding: 8px 16px; border: 0; border-radius: 8px; background: #ff6b35; color: #fff; font-weight: 600; cursor: pointer; }
     .od-otp-btn:disabled { background: #ccc; cursor: default; }
@@ -318,6 +316,19 @@ function injectOtpStyles() {
     .od-otp-msg.od-ok { color: #2e7d32; }
     .od-otp-msg.od-err { color: #d32f2f; }
   `;
+
+// 「傳送驗證碼」鈕的狀態：已驗證 > 冷卻倒數 > 可傳送（傳過就叫「重新傳送」）
+export function otpSendButtonState({ verified, cooldownLeft, sent }) {
+  if (verified) return { disabled: true, text: "已驗證" };
+  if (cooldownLeft > 0) return { disabled: true, text: `重新傳送（${cooldownLeft}）` };
+  return { disabled: false, text: sent ? "重新傳送" : "傳送驗證碼" };
+}
+
+function injectOtpStyles() {
+  if (document.getElementById("od-otp-styles")) return;
+  const style = document.createElement("style");
+  style.id = "od-otp-styles";
+  style.textContent = OTP_STYLES;
   document.head.appendChild(style);
 }
 
@@ -454,7 +465,7 @@ async function initPaymentFlow() {
   let busy = false;
   let quoteTimer = null;
   // 手機驗證狀態：verifiedPhone 是拿到 checkoutToken 時的號碼；號碼一改就作廢
-  const otp = { token: "", phone: "", checkoutToken: "", verifiedPhone: "", cooldownTimer: null };
+  const otp = { token: "", phone: "", checkoutToken: "", verifiedPhone: "", cooldownTimer: null, cooldownLeft: 0 };
   const phoneInput = formEl.querySelector(`[name="${FIELD_NAME_MAP.phone}"]`);
   const otpUi = phoneInput ? mountOtp(phoneInput) : null;
   const submitBtn = formEl.querySelector("[type=submit]");
@@ -478,11 +489,14 @@ async function initPaymentFlow() {
     if (!otpUi) return;
     otpUi.block.hidden = true;
     otpUi.code.value = "";
-    if (!otp.cooldownTimer) {
-      otpUi.send.disabled = false;
-      otpUi.send.textContent = "傳送驗證碼";
-    }
+    renderSendButton();
     setOtpMsg(otpUi, message || "", message ? "err" : "");
+  }
+
+  function renderSendButton() {
+    const s = otpSendButtonState({ verified: !!otp.checkoutToken, cooldownLeft: otp.cooldownLeft, sent: !!otp.token });
+    otpUi.send.disabled = s.disabled;
+    otpUi.send.textContent = s.text;
   }
 
   function onTokenError(message) {
@@ -491,19 +505,16 @@ async function initPaymentFlow() {
   }
 
   function startCooldown() {
-    let left = OTP_COOLDOWN_SECONDS;
-    otpUi.send.disabled = true;
-    otpUi.send.textContent = `重新傳送（${left}）`;
+    otp.cooldownLeft = OTP_COOLDOWN_SECONDS;
+    renderSendButton();
     otp.cooldownTimer = setInterval(() => {
-      left -= 1;
-      if (left <= 0) {
+      otp.cooldownLeft -= 1;
+      if (otp.cooldownLeft <= 0) {
         clearInterval(otp.cooldownTimer);
         otp.cooldownTimer = null;
-        otpUi.send.disabled = !!otp.checkoutToken;
-        otpUi.send.textContent = otp.checkoutToken ? "已驗證" : "重新傳送";
-      } else if (!otp.checkoutToken) {
-        otpUi.send.textContent = `重新傳送（${left}）`;
+        otp.cooldownLeft = 0;
       }
+      renderSendButton();
     }, 1000);
   }
 
@@ -548,8 +559,7 @@ async function initPaymentFlow() {
         otp.checkoutToken = r.checkoutToken;
         otp.verifiedPhone = otp.phone;
         otpUi.block.hidden = true;
-        otpUi.send.disabled = true;
-        otpUi.send.textContent = "已驗證";
+        renderSendButton();
         setOtpMsg(otpUi, "手機已驗證", "ok");
         maybeQuote();
       } else {
