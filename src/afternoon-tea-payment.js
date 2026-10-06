@@ -144,9 +144,16 @@ export function normalizePricingPlan(raw) {
 
 // 是否已具備自動試算的最小條件：選了場次、手機已驗證（拿到 checkout_token）；
 // 不驗手機的頁面（phoneOtp:false）則是手機有填。
+// 不驗手機的頁面要等手機打完整（09 開頭 10 碼）才試算，避免打到一半就打 API／跳錯誤。
 export function canAutoQuote(form, checkoutToken, { phoneOtp = true } = {}) {
   if (!form.session_id) return false;
-  return phoneOtp ? !!checkoutToken : !!String(form.phone || "").trim();
+  return phoneOtp ? !!checkoutToken : /^09\d{8}$/.test(String(form.phone || "").trim());
+}
+
+// 試算結果只取決於 /quote/ 的 payload；key 不變（只改姓名／年齡／Email 等）就不必重算、
+// 也不要把金額與卡片欄位藏起來——手機上區塊一收一放會讓畫面上下跳。
+export function quoteKey(form, checkoutToken, opts = {}) {
+  return JSON.stringify(buildQuotePayload(form, checkoutToken, opts));
 }
 
 export function validateForm(form) {
@@ -392,12 +399,9 @@ function mountCardFields() {
 }
 
 // 步驟一：試算金額。回傳 { form, quote }，失敗回 null；手機驗證失效時呼叫 onTokenError。
+// 只靠場次＋手機就能試算；整張表的檢查留到送出時（打字途中不閃錯誤訊息）。
 async function runQuote(formEl, checkoutToken, onTokenError) {
   const form = readForm(formEl);
-  const errors = validateForm(form);
-  if (errors.length) { showErrors(errors); return null; }
-  showErrors([]);
-
   const quoteRes = await api("/quote/", {
     method: "POST",
     body: JSON.stringify(buildQuotePayload(form, checkoutToken, PAYLOAD_OPTS)),
@@ -411,6 +415,7 @@ async function runQuote(formEl, checkoutToken, onTokenError) {
     return null;
   }
 
+  showErrors([]);
   const session = sessionsById.get(form.session_id);
   const quote = formatQuoteResult(quoteRes.body, { fixedPrice: !!session && session.price != null });
   showAmount(quote.message);
@@ -490,6 +495,7 @@ async function initPaymentFlow() {
   // 送出鈕變「確認付款 NT$X」並啟用；任何相關欄位變動就讓 quote 失效並重算。
   // 金額仍在刷卡前先出現，避免方案降級造成的意外扣款。
   let current = null; // { form, quote }
+  let quotedKey = ""; // current 對應的 quoteKey；欄位變動後 key 沒變就沿用
   let busy = false;
   let quoteTimer = null;
   // 手機驗證狀態：verifiedPhone 是拿到 checkoutToken 時的號碼；號碼一改就作廢
@@ -500,8 +506,13 @@ async function initPaymentFlow() {
   const initialLabel = submitBtn ? (submitBtn.tagName === "INPUT" ? submitBtn.value : submitBtn.textContent) : "";
   if (submitBtn) submitBtn.disabled = true; // 試算完成前不可送出
 
+  function currentQuoteKey() {
+    return quoteKey(readForm(formEl), otp.checkoutToken, PAYLOAD_OPTS);
+  }
+
   function invalidateQuote() {
     current = null;
+    quotedKey = "";
     if (submitBtn) {
       submitBtn.disabled = true;
       setSubmitLabel(submitBtn, initialLabel);
@@ -615,8 +626,17 @@ async function initPaymentFlow() {
   async function doQuote() {
     if (busy) return;
     busy = true;
+    const key = currentQuoteKey();
+    let stale = false;
     try {
       current = await runQuote(formEl, otp.checkoutToken, onTokenError);
+      // 試算途中場次／手機又改了 → 這次結果作廢、結束後重算
+      if (currentQuoteKey() !== key) {
+        stale = true;
+        invalidateQuote();
+        return;
+      }
+      quotedKey = current ? key : "";
       if (submitBtn) {
         submitBtn.disabled = !current;
         if (current) {
@@ -628,6 +648,7 @@ async function initPaymentFlow() {
       }
     } finally {
       busy = false;
+      if (stale) maybeQuote();
     }
   }
 
@@ -639,13 +660,15 @@ async function initPaymentFlow() {
     quoteTimer = setTimeout(() => { doQuote(); }, 500);
   }
 
-  // 任一欄位變動（含改場次）→ 先讓舊 quote 失效，再排程重算。
+  // 影響金額的欄位（場次／手機／方案）變動 → 先讓舊 quote 失效，再排程重算；
+  // 其他欄位（姓名／年齡／Email…）不影響金額 → 什麼都不動，避免手機上畫面跳動。
   // 改了手機號碼 → 之前的驗證作廢（驗證碼欄位自己的輸入不算）。
   function onFieldChange(e) {
     if (otpUi && e && e.target === otpUi.code) return;
     if (phoneInput && otp.verifiedPhone && String(phoneInput.value || "").trim() !== otp.verifiedPhone) {
       resetVerification("");
     }
+    if (quotedKey && currentQuoteKey() === quotedKey) return;
     invalidateQuote();
     maybeQuote();
   }
@@ -655,10 +678,15 @@ async function initPaymentFlow() {
   formEl.addEventListener("submit", async (e) => {
     e.preventDefault(); // 接管 Webflow 預設送出
     if (busy || !current) return; // 尚未試算完成不送出（按鈕本來就 disabled）
+    // 送出用表單最新內容（試算後可能改過姓名／Email），整張表在這裡才檢查
+    const form = readForm(formEl);
+    const errors = validateForm(form);
+    if (errors.length) { showErrors(errors); return; }
+    if (quoteKey(form, otp.checkoutToken, PAYLOAD_OPTS) !== quotedKey) { invalidateQuote(); maybeQuote(); return; }
     busy = true;
     if (submitBtn) submitBtn.disabled = true;
     try {
-      await submitRegistration(current.form, current.quote, otp.checkoutToken, onTokenError);
+      await submitRegistration(form, current.quote, otp.checkoutToken, onTokenError);
     } finally {
       busy = false;
       if (submitBtn) submitBtn.disabled = false;
