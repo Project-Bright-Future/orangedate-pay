@@ -8,6 +8,7 @@ import {
   formatDeadline,
   formatSessionCard,
   canAutoQuote,
+  quoteKey,
   normalizeGender,
   normalizePricingPlan,
   validateForm,
@@ -284,6 +285,16 @@ describe("固定價場次（工作坊，phoneOtp:false）", () => {
     expect(canAutoQuote({ session_id: 1, phone: " " }, "", opts)).toBe(false);
     expect(canAutoQuote({ session_id: null, phone: "0912345678" }, "", opts)).toBe(false);
   });
+  it("不驗手機：手機沒打完整（09 開頭 10 碼）前不試算", () => {
+    expect(canAutoQuote({ session_id: 1, phone: "0912" }, "", opts)).toBe(false);
+    expect(canAutoQuote({ session_id: 1, phone: "091234567" }, "", opts)).toBe(false);
+    expect(canAutoQuote({ session_id: 1, phone: "1912345678" }, "", opts)).toBe(false);
+  });
+  it("不驗手機：quoteKey 隨手機變、不隨姓名變", () => {
+    const k = quoteKey(sampleForm, "", opts);
+    expect(quoteKey({ ...sampleForm, name: "別人" }, "", opts)).toBe(k);
+    expect(quoteKey({ ...sampleForm, phone: "0987654321" }, "", opts)).not.toBe(k);
+  });
   it("固定價文案不提會員方案", () => {
     expect(formatQuoteResult({ plan: "general", amount: 600 }, { fixedPrice: true })).toEqual({
       needsCard: true,
@@ -300,5 +311,19 @@ describe("固定價場次（工作坊，phoneOtp:false）", () => {
     });
     expect(card.totalLabel).toBe("剩餘名額：11");
     expect(card.soldOut).toBe(false);
+  });
+});
+
+describe("quoteKey（只有影響金額的欄位變了才重算）", () => {
+  const k = quoteKey(sampleForm, "ck_1");
+  it("改姓名／年齡／Email／暱稱／備註／性別 → key 不變", () => {
+    for (const patch of [{ name: "王大明" }, { age: 41 }, { email: "x@y.zz" }, { nickname: "阿明" }, { note: "" }, { gender: "female" }]) {
+      expect(quoteKey({ ...sampleForm, ...patch }, "ck_1")).toBe(k);
+    }
+  });
+  it("改場次／方案／驗證 token → key 改變", () => {
+    expect(quoteKey({ ...sampleForm, session_id: 2 }, "ck_1")).not.toBe(k);
+    expect(quoteKey({ ...sampleForm, pricing_plan: "general" }, "ck_1")).not.toBe(k);
+    expect(quoteKey(sampleForm, "ck_2")).not.toBe(k);
   });
 });
