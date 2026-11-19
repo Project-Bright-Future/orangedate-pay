@@ -287,6 +287,7 @@ function track(event, params) {
 
 const STYLES = `
 #od-party{max-width:560px;margin:0 auto;font-size:16px;color:#333}
+#od-party [hidden]{display:none!important}
 #od-party .odp-field{margin:0 0 18px}
 #od-party label.odp-label{display:block;font-weight:600;margin:0 0 6px}
 #od-party .odp-hint{font-size:13px;color:#888;margin:4px 0 0}
