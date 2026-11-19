@@ -85,7 +85,8 @@ function renderView(view) {
     if (el && val !== undefined && val !== null) el.textContent = val;
   };
   set("od-session-title", view.sessionTitle);
-  set("od-name", view.name);
+  // 交友活動有名牌編號：成功頁的「暱稱（名牌編號）」欄顯示「小橘（M03）」
+  set("od-name", view.badgeNo ? `${view.name}（${view.badgeNo}）` : view.name);
   set("od-amount", view.amount != null ? `NT$${view.amount}` : "");
   set("od-order-id", view.orderId);
   set("od-status", view.statusLabel);
