@@ -52,6 +52,7 @@ export function buildResultView(statusRes) {
     amount: statusRes.amount,
     sessionTitle: statusRes.session_title,
     name: statusRes.name,
+    badgeNo: statusRes.badge_no || "",
     status: statusRes.status,
     statusLabel: statusLabel(statusRes.status),
     confirmed: statusRes.status === "confirmed",
@@ -89,6 +90,19 @@ function renderView(view) {
   set("od-order-id", view.orderId);
   set("od-status", view.statusLabel);
   set("od-subtitle", successSubtitle(view));
+  set("od-badge-no", view.badgeNo || null);
+}
+
+// 付款成功只送一次 GTM 事件（重新整理頁面不重送）
+function trackPaymentSuccess(view, orderId) {
+  if (!view.confirmed) return;
+  const key = `od_paid_${orderId}`;
+  try {
+    if (window.sessionStorage.getItem(key)) return;
+    window.sessionStorage.setItem(key, "1");
+  } catch (_) {}
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event: "event_payment_success", value: view.amount, currency: "TWD" });
 }
 
 async function initResultPage() {
@@ -104,7 +118,9 @@ async function initResultPage() {
     window.location.replace(`${target}?order=${encodeURIComponent(orderId)}`);
     return;
   }
-  renderView(buildResultView(final));
+  const view = buildResultView(final);
+  renderView(view);
+  trackPaymentSuccess(view, orderId);
 }
 
 if (typeof document !== "undefined") {
