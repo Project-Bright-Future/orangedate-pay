@@ -261,7 +261,9 @@ const PAGE_STYLES = `
 #od-party-page .odp-table{width:100%;border-collapse:collapse;font-size:15px}
 #od-party-page .odp-table th,#od-party-page .odp-table td{border-bottom:1px solid #eee;padding:10px 8px;text-align:left;vertical-align:top}
 #od-party-page .odp-table th{color:#888;font-weight:600;white-space:nowrap}
-#od-party-page .odp-price th,#od-party-page .odp-price td{text-align:center}
+#od-party-page .odp-price th,#od-party-page .odp-price td{text-align:center;white-space:normal}
+#od-party-page .odp-price{table-layout:fixed}
+@media (max-width:480px){#od-party-page .odp-price{font-size:13px}#od-party-page .odp-price th,#od-party-page .odp-price td{padding:8px 2px}}
 #od-party-page .odp-price td:nth-child(3){color:#ff6b35;font-weight:700}
 #od-party-page .odp-box{border-radius:10px;padding:14px 16px;background:#fff6f0}
 #od-party-page .odp-box ul{margin:0;padding-left:20px}
