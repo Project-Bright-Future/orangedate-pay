@@ -220,6 +220,7 @@ export function contentHtml(session, opts = {}) {
     ["有問題找誰？", "加入橘時相遇 LINE 官方帳號詢問。"],
   ];
   return `
+  <div class="odp-box odp-promo" id="od-hero-promo-box">${heroPromoLines(s, opts.now).map(escapeHtml).join("<br>")}<br><b>${escapeHtml(remainingText(s))}</b></div>
   <section class="odp-sec"><h2>活動詳情</h2>
     <table class="odp-table">
       <tr><th>日期時間</th><td>${escapeHtml(s.date.replace(/-/g, "/"))}（${WEEKDAYS[new Date(`${s.date}T00:00:00Z`).getUTCDay()]}）${escapeHtml(time)}，13:30 開放報到</td></tr>
@@ -248,7 +249,7 @@ export function contentHtml(session, opts = {}) {
     <li>報到時：已完成 App 兩項驗證的人免看證件，其他人請攜帶身分證</li>
     <li>請於 13:30–14:00 完成報到，14:00 準時開始</li>
   </ul></div></section>
-  <section class="odp-sec" id="od-party-form"><h2>立即報名</h2><p class="odp-hint">線上付款即完成報名｜名額有限</p><div id="od-party"></div></section>
+  <section class="odp-sec" id="od-party-form"><span id="wf-form"></span><h2>立即報名</h2><p class="odp-hint">線上付款即完成報名｜名額有限</p><div id="od-party"></div></section>
   <section class="odp-sec"><h2>常見問題</h2>
     ${faq.map(([q, a]) => `<details class="odp-faq"><summary>${escapeHtml(q)}</summary><p>${escapeHtml(a)}</p></details>`).join("")}
   </section>`;
@@ -264,6 +265,7 @@ const PAGE_STYLES = `
 #od-party-page .odp-price td:nth-child(3){color:#ff6b35;font-weight:700}
 #od-party-page .odp-box{border-radius:10px;padding:14px 16px;background:#fff6f0}
 #od-party-page .odp-box ul{margin:0;padding-left:20px}
+#od-party-page .odp-promo{text-align:center;font-size:17px;margin-top:8px}
 #od-party-page .odp-faq{border-bottom:1px solid #eee;padding:12px 0}
 #od-party-page .odp-faq summary{cursor:pointer;font-weight:600}
 #od-party-page .odp-hint{font-size:14px;color:#888}
@@ -417,7 +419,7 @@ function initParty() {
   const $ = (sel) => root.querySelector(sel);
 
   // 頁面其他地方的按鈕（Hero CTA、下載 App）也記事件
-  document.querySelectorAll('a[href="#od-party"],[data-od-cta]').forEach((el) =>
+  document.querySelectorAll('a[href="#od-party"],a[href="#wf-form"],[data-od-cta]').forEach((el) =>
     el.addEventListener("click", () => track("event_cta_click")));
   document.querySelectorAll("[data-od-app-download]").forEach((el) =>
     el.addEventListener("click", () => track("event_app_download_click", { position: el.dataset.odAppDownload || "" })));
