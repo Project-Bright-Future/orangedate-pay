@@ -173,6 +173,103 @@ export function remainingText(session) {
   return `男生剩餘 ${session.remaining_male ?? "-"} 名｜女生剩餘 ${session.remaining_female ?? "-"} 名`;
 }
 
+const WEEKDAYS = "日一二三四五六";
+// "2026-12-06T15:59:59Z" → "12/6（日）"（台北時間）
+export function mdw(iso) {
+  if (!iso) return "";
+  const d = new Date(new Date(iso).getTime() + 8 * 3600 * 1000);
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}（${WEEKDAYS[d.getUTCDay()]}）`;
+}
+
+// Hero 動態那一行：12/6 前／12/7 起／女生延長期間文案不同
+export function heroPromoLines(session, now = new Date()) {
+  const lines = [];
+  if (isEarlyPeriod(session, now)) {
+    lines.push(`${mdw(session.early_bird_deadline).replace(/（.）/, "")} 前完成 App 人臉與單身驗證，現省 NT$300`);
+  } else {
+    lines.push("完成 App 驗證，報名省 NT$150");
+    if (session.female_early_extended && session.female_early_extend_until && now <= new Date(session.female_early_extend_until)) {
+      lines.push(`女生早鳥價延長到 ${mdw(session.female_early_extend_until).replace(/（.）/, "")}`);
+    }
+  }
+  lines.push("總報名未滿 20 人將取消活動並全額退費");
+  return lines;
+}
+
+function priceCell(n) {
+  return n == null ? "-" : `NT$${formatTwd(n)}`;
+}
+
+export function contentHtml(session, opts = {}) {
+  const s = session;
+  const early = mdw(s.early_bird_deadline);
+  const earlyShort = early.replace(/（.）/, "");
+  const ext = mdw(s.female_early_extend_until).replace(/（.）/, "");
+  const regEnd = mdw(s.registration_end_at).replace(/（.）/, "");
+  const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.location_address || s.location_name)}`;
+  const time = `${String(s.start_time).slice(0, 5)}–${String(s.end_time || "").slice(0, 5)}`;
+  const onelink = opts.appLink || "";
+  const faq = [
+    ["怎樣算報名成功？", "線上付款成功即完成報名，系統會立即寄出確認信。"],
+    ["名額滿了怎麼辦？", "可以登記候補，有人釋出名額會依登記順序通知。"],
+    ["可以退費嗎？", "付款後 7 天內、活動開始前取消可全額退費；超過 7 天取消退 90%。也可以把名額轉讓給同性別的朋友。"],
+    ["需要準備什麼？", "一份 NT$300–500 的聖誕交換禮物，包裝好並寫上自己的名字（禮物費用不含在活動費用內）；未完成 App 驗證的人請帶身分證。"],
+    ["一個人來會不會尷尬？", "大部分參加者都是自己來的，當天有破冰遊戲和輪桌聊天，很快就能聊開。"],
+    ["驗證價怎麼拿？", `在橘時相遇 App 完成人臉驗證與單身驗證，報名時輸入手機並完成簡訊驗證碼，系統會自動套用。${earlyShort} 前付款省 NT$300，之後省 NT$150。單身驗證約 24 小時內審核完成，建議提早一天送出。`],
+    ["沒有驗證也能報名嗎？", "可以，以原價報名，報到時請帶身分證。"],
+    ["有問題找誰？", "加入橘時相遇 LINE 官方帳號詢問。"],
+  ];
+  return `
+  <section class="odp-sec"><h2>活動詳情</h2>
+    <table class="odp-table">
+      <tr><th>日期時間</th><td>${escapeHtml(s.date.replace(/-/g, "/"))}（${WEEKDAYS[new Date(`${s.date}T00:00:00Z`).getUTCDay()]}）${escapeHtml(time)}，13:30 開放報到</td></tr>
+      <tr><th>地點</th><td>${escapeHtml(s.location_name)}，${escapeHtml(s.location_address)}<br><a href="${mapUrl}" target="_blank" rel="noopener">Google 地圖</a></td></tr>
+      <tr><th>交通</th><td>中壢火車站後站步行約 3–5 分鐘；附近有收費停車場</td></tr>
+      <tr><th>名額</th><td>男 ${s.max_male} 人、女 ${s.max_female} 人，共 ${s.max_male + s.max_female} 人</td></tr>
+      <tr><th>對象</th><td>${s.min_age}–${s.max_age} 歲單身男女</td></tr>
+      <tr><th>含餐</th><td>輕食與沙拉、聖誕麻糬鬆餅、風味花果茶；交換禮物請自備（NT$300–500，不含在活動費用內）</td></tr>
+      <tr><th>主辦</th><td>橘時相遇（橘齡未來股份有限公司）× 微笑幸福團</td></tr>
+    </table></section>
+  <section class="odp-sec"><h2>費用說明</h2>
+    <table class="odp-table odp-price">
+      <tr><th>身分</th><th>原價</th><th>早鳥驗證價<br><small>${escapeHtml(early)} 23:59 前付款</small></th><th>之後已驗證</th></tr>
+      <tr><td>男</td><td>${priceCell(s.price_male_base)}</td><td>${priceCell(s.price_male_early)}</td><td>${priceCell(s.price_male_verified)}</td></tr>
+      <tr><td>女</td><td>${priceCell(s.price_female_base)}</td><td>${priceCell(s.price_female_early)}</td><td>${priceCell(s.price_female_verified)}</td></tr>
+    </table>
+    <p>${escapeHtml(early)} 23:59 前，在橘時相遇 App 完成人臉驗證與單身驗證，報名現省 NT$300。想拿早鳥價，建議提早一天送出單身驗證。${ext ? `女生名額若到時未滿，女生早鳥價延長到 ${escapeHtml(ext)}。` : ""}</p>
+    ${onelink ? `<p><a class="odp-btn" href="${onelink}" target="_blank" rel="noopener" data-od-app-download="fee">下載 App 去驗證</a></p>` : ""}
+    <p>活動費用含下午茶餐點與茶飲。聖誕交換禮物請自備：NT$300–500，包裝好並寫上自己的名字，禮物費用不包含在活動費用內。</p>
+  </section>
+  <section class="odp-sec"><h2>注意事項</h2><div class="odp-box"><ul>
+    <li>本活動限 ${s.min_age}–${s.max_age} 歲單身者參加，報名時需勾選單身聲明</li>
+    <li>請自備一份 NT$300–500 的聖誕交換禮物，包裝好並在外面寫上自己的名字；禮物費用不包含在本活動費用內</li>
+    <li>退費：付款後 7 天內且活動開始前取消，全額退費；超過 7 天取消退 90%；名額可轉讓給同性別朋友</li>
+    <li>${escapeHtml(regEnd)} 報名截止時總人數未滿 20 人，活動取消並全額退費</li>
+    <li>報到時：已完成 App 兩項驗證的人免看證件，其他人請攜帶身分證</li>
+    <li>請於 13:30–14:00 完成報到，14:00 準時開始</li>
+  </ul></div></section>
+  <section class="odp-sec" id="od-party-form"><h2>立即報名</h2><p class="odp-hint">線上付款即完成報名｜名額有限</p><div id="od-party"></div></section>
+  <section class="odp-sec"><h2>常見問題</h2>
+    ${faq.map(([q, a]) => `<details class="odp-faq"><summary>${escapeHtml(q)}</summary><p>${escapeHtml(a)}</p></details>`).join("")}
+  </section>`;
+}
+
+const PAGE_STYLES = `
+#od-party-page{max-width:720px;margin:0 auto;padding:24px 16px 48px;color:#333;line-height:1.7}
+#od-party-page h2{font-size:24px;margin:40px 0 16px;color:#333}
+#od-party-page .odp-table{width:100%;border-collapse:collapse;font-size:15px}
+#od-party-page .odp-table th,#od-party-page .odp-table td{border-bottom:1px solid #eee;padding:10px 8px;text-align:left;vertical-align:top}
+#od-party-page .odp-table th{color:#888;font-weight:600;white-space:nowrap}
+#od-party-page .odp-price th,#od-party-page .odp-price td{text-align:center}
+#od-party-page .odp-price td:nth-child(3){color:#ff6b35;font-weight:700}
+#od-party-page .odp-box{border-radius:10px;padding:14px 16px;background:#fff6f0}
+#od-party-page .odp-box ul{margin:0;padding-left:20px}
+#od-party-page .odp-faq{border-bottom:1px solid #eee;padding:12px 0}
+#od-party-page .odp-faq summary{cursor:pointer;font-weight:600}
+#od-party-page .odp-hint{font-size:14px;color:#888}
+#od-party-page .odp-btn{display:inline-block;border-radius:999px;background:#ff6b35;color:#fff;font-weight:600;padding:12px 20px;text-decoration:none}
+`;
+
 // ---- 瀏覽器 glue ----
 const CFG = (typeof window !== "undefined" && window.OD_PAYMENT) || {};
 const API_BASE = CFG.apiBase || "https://dev-api.orangedate.com/api/pbf-event";
@@ -269,15 +366,43 @@ function formHtml(session) {
   <p class="odp-hint" id="odp-submit-hint" style="text-align:center"></p>`;
 }
 
-function initParty() {
-  const root = document.querySelector("#od-party");
-  if (!root) return;
+async function fetchSession(api) {
+  const r = await api(`/sessions/?category=${encodeURIComponent(CFG.category || "party")}`, { method: "GET" });
+  const list = Array.isArray(r.body) ? r.body : [];
+  return (CFG.sessionId ? list.find((x) => x.id === CFG.sessionId) : list[0]) || null;
+}
+
+// Hero 裡的動態元素（Webflow 元素設 id 即可）：od-hero-promo、od-hero-remaining、od-hero-price
+function renderHero(s) {
+  const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  set("od-hero-promo", heroPromoLines(s).map(escapeHtml).join("<br>"));
+  set("od-hero-remaining", escapeHtml(remainingText(s)));
+  set("od-hero-price", `男 NT$${formatTwd(s.price_male_early)}｜女 NT$${formatTwd(s.price_female_early)} 起`);
+}
+
+async function initPage() {
   if (!document.getElementById("odp-styles")) {
     const st = document.createElement("style");
     st.id = "odp-styles";
-    st.textContent = STYLES;
+    st.textContent = STYLES + PAGE_STYLES;
     document.head.appendChild(st);
   }
+  const page = document.querySelector("#od-party-page");
+  if (page) {
+    const s = await fetchSession(createApi(API_BASE)).catch(() => null);
+    if (!s) {
+      page.innerHTML = '<div class="odp-box">報名尚未開放或已截止。有問題請加入橘時相遇 LINE 官方帳號詢問。</div>';
+      return;
+    }
+    page.innerHTML = contentHtml(s, { appLink: ONELINK });
+    renderHero(s);
+  }
+  initParty();
+}
+
+function initParty() {
+  const root = document.querySelector("#od-party");
+  if (!root) return;
   const api = createApi(API_BASE);
   const otpApi = createApi(OTP_BASE);
   const utm = parseUtm(window.location.search);
@@ -500,14 +625,12 @@ function initParty() {
   }
 
   async function refreshSession() {
-    const r = await api(`/sessions/?category=${encodeURIComponent(CFG.category || "party")}`, { method: "GET" });
-    const list = Array.isArray(r.body) ? r.body : [];
-    const s = CFG.sessionId ? list.find((x) => x.id === CFG.sessionId) : list[0];
+    const s = await fetchSession(api);
     if (!s) return null;
     state.session = s;
     const rem = $("#odp-remaining");
     if (rem) rem.textContent = remainingText(s);
-    document.querySelectorAll("[data-od-remaining]").forEach((el) => { el.textContent = remainingText(s); });
+    renderHero(s);
     return s;
   }
 
@@ -535,6 +658,6 @@ function initParty() {
 }
 
 if (typeof document !== "undefined") {
-  if (document.readyState !== "loading") initParty();
-  else document.addEventListener("DOMContentLoaded", initParty);
+  if (document.readyState !== "loading") initPage();
+  else document.addEventListener("DOMContentLoaded", initPage);
 }

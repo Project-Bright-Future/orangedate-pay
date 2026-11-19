@@ -145,3 +145,27 @@ describe("其他", () => {
     expect(remainingText(SESSION)).toBe("男生剩餘 0 名｜女生剩餘 12 名");
   });
 });
+
+import { contentHtml, heroPromoLines, mdw } from "../src/party-registration.js";
+
+describe("頁面內容", () => {
+  const S = { ...SESSION, start_time: "14:00:00", end_time: "17:00:00", location_name: "古月新城", location_address: "桃園市中壢區健行路 41 號", max_male: 20, max_female: 20, registration_end_at: "2026-12-11T15:59:59Z" };
+  it("mdw 用台北時間", () => {
+    expect(mdw("2026-12-06T15:59:59Z")).toBe("12/6（日）");
+  });
+  it("hero 文案依日期切換", () => {
+    expect(heroPromoLines(S, new Date("2026-12-01T00:00:00Z"))[0]).toBe("12/6 前完成 App 人臉與單身驗證，現省 NT$300");
+    const after = heroPromoLines(S, new Date("2026-12-08T00:00:00Z"));
+    expect(after).toContain("完成 App 驗證，報名省 NT$150");
+    expect(after).toContain("女生早鳥價延長到 12/11");
+    expect(after.at(-1)).toBe("總報名未滿 20 人將取消活動並全額退費");
+  });
+  it("內容含價格表、地點、退費規則、表單掛點，且不用破折號", () => {
+    const html = contentHtml(S, { appLink: "https://x" });
+    for (const t of ["NT$1,280", "NT$580", "健行路 41 號", "退 90%", 'id="od-party"', "2026/12/13（日）14:00–17:00", "12/11 報名截止"]) {
+      expect(html).toContain(t);
+    }
+    expect(html).not.toContain("—");
+    expect(html).not.toMatch(/孤單|寂寞|大齡/);
+  });
+});
