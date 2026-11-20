@@ -63,6 +63,22 @@ export function basePrice(session, gender) {
   return gender === "male" ? session.price_male_base : session.price_female_base;
 }
 
+// 各性別「驗證後現在省多少」（原價 − 現在的驗證價）
+export function savingFor(session, gender, now = new Date()) {
+  const b = basePrice(session, gender);
+  const v = verifiedPrice(session, gender, now);
+  return b == null || v == null ? null : b - v;
+}
+
+// 「男生省 NT$500、女生省 NT$400」
+export function savingBothText(session, now = new Date()) {
+  return `男生省 NT$${formatTwd(savingFor(session, "male", now))}、女生省 NT$${formatTwd(savingFor(session, "female", now))}`;
+}
+
+function femaleExtActive(session, now) {
+  return !!(session.female_early_extended && session.female_early_extend_until && now <= new Date(session.female_early_extend_until));
+}
+
 export function isEarlyPeriod(session, now = new Date()) {
   return !!session.early_bird_deadline && now <= new Date(session.early_bird_deadline);
 }
@@ -81,12 +97,14 @@ const SINGLE_MISSING = {
 // choice：pay＝直接付款；either＝A 原價付款／B 先去驗證；waitReview＝A 原價付款／B 等審核
 export function eligibilityView(body, saving) {
   body = body || {};
+  // saving：數字＝已知性別省多少；字串＝已組好的文字（性別未定時用「男生省…、女生省…」）
+  const save = typeof saving === "number" ? `現省 NT$${formatTwd(saving)}` : saving;
   const price = body.price != null ? `NT$${formatTwd(body.price)}` : "";
   switch (body.status) {
     case "eligible":
       return { tone: "ok", message: `你符合驗證價 ${price}`, choice: "pay" };
     case "no_account":
-      return { tone: "info", message: `下載橘時相遇 App 完成人臉驗證與單身驗證，報名現省 NT$${saving}`, choice: "either" };
+      return { tone: "info", message: `下載橘時相遇 App 完成人臉驗證與單身驗證，報名${save}`, choice: "either" };
     case "single_reviewing":
       if (body.face_passed) {
         return { tone: "info", message: "單身驗證審核中，24 小時內會有結果，通過後會通知你", choice: "waitReview" };
@@ -99,7 +117,7 @@ export function eligibilityView(body, saving) {
       const missing = [];
       if (!body.face_passed) missing.push("人臉驗證");
       if (body.single_status !== "passed") missing.push(SINGLE_MISSING[body.single_status] || "單身驗證");
-      return { tone: "info", message: `還差：${missing.join("、")}。完成後報名現省 NT$${saving}`, choice: "either" };
+      return { tone: "info", message: `還差：${missing.join("、")}。完成後報名${save}`, choice: "either" };
     }
     default:
       return { tone: "warn", message: GENERIC_ERROR, choice: "none" };
@@ -185,12 +203,11 @@ export function mdw(iso) {
 export function heroPromoLines(session, now = new Date()) {
   const lines = [];
   if (isEarlyPeriod(session, now)) {
-    lines.push(`${mdw(session.early_bird_deadline).replace(/（.）/, "")} 前完成 App 人臉與單身驗證，現省 NT$300`);
+    lines.push(`${mdw(session.early_bird_deadline).replace(/（.）/, "")} 前完成 App 人臉與單身驗證，${savingBothText(session, now)}`);
+  } else if (femaleExtActive(session, now)) {
+    lines.push(`完成 App 驗證，男生省 NT$${formatTwd(savingFor(session, "male", now))}；女生早鳥價延長到 ${mdw(session.female_early_extend_until).replace(/（.）/, "")}，省 NT$${formatTwd(savingFor(session, "female", now))}`);
   } else {
-    lines.push("完成 App 驗證，報名省 NT$150");
-    if (session.female_early_extended && session.female_early_extend_until && now <= new Date(session.female_early_extend_until)) {
-      lines.push(`女生早鳥價延長到 ${mdw(session.female_early_extend_until).replace(/（.）/, "")}`);
-    }
+    lines.push(`完成 App 驗證，${savingBothText(session, now)}`);
   }
   lines.push("總報名未滿 20 人將取消活動並全額退費");
   return lines;
@@ -209,13 +226,18 @@ export function contentHtml(session, opts = {}) {
   const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.location_address || s.location_name)}`;
   const time = `${String(s.start_time).slice(0, 5)}–${String(s.end_time || "").slice(0, 5)}`;
   const onelink = opts.appLink || "";
+  const earlyEnd = s.early_bird_deadline ? new Date(s.early_bird_deadline) : null;
+  const earlySave = earlyEnd ? savingBothText(s, new Date(earlyEnd.getTime() - 1000)) : "";
+  const laterSave = earlyEnd ? savingBothText({ ...s, female_early_extended: false }, new Date(earlyEnd.getTime() + 1000)) : "";
+  const afterEarly = earlyEnd ? mdw(new Date(earlyEnd.getTime() + 1000).toISOString()).replace(/（.）/, "") : "";
+  const dayBefore = earlyEnd ? mdw(new Date(earlyEnd.getTime() - 86400000).toISOString()).replace(/（.）/, "") : "";
   const faq = [
     ["怎樣算報名成功？", "線上付款成功即完成報名，系統會立即寄出確認信。"],
     ["名額滿了怎麼辦？", "可以登記候補，有人釋出名額會依登記順序通知。"],
     ["可以退費嗎？", "付款後 7 天內、活動開始前取消可全額退費；超過 7 天取消退 90%。也可以把名額轉讓給同性別的朋友。"],
-    ["需要準備什麼？", "一份 NT$300–500 的聖誕交換禮物，包裝好並寫上自己的名字（禮物費用不含在活動費用內）；未完成 App 驗證的人請帶身分證。"],
+    ["需要準備什麼？", "一份 NT$100–300 的聖誕交換禮物，包裝好並寫上自己的名字（禮物費用不含在活動費用內）；未完成 App 驗證的人請帶身分證。"],
     ["一個人來會不會尷尬？", "大部分參加者都是自己來的，當天有破冰遊戲和輪桌聊天，很快就能聊開。"],
-    ["驗證價怎麼拿？", `在橘時相遇 App 完成人臉驗證與單身驗證，報名時輸入手機並完成簡訊驗證碼，系統會自動套用。${earlyShort} 前付款省 NT$300，之後省 NT$150。單身驗證約 24 小時內審核完成，建議提早一天送出。`],
+    ["驗證價怎麼拿？", `在橘時相遇 App 完成人臉驗證與單身驗證，報名時輸入手機並完成簡訊驗證碼，系統會自動套用。${earlyShort} 前付款${earlySave}；${afterEarly} 起${laterSave}。單身驗證約 24 小時內審核完成，建議 ${dayBefore} 前送出。`],
     ["沒有驗證也能報名嗎？", "可以，以原價報名，報到時請帶身分證。"],
     ["有問題找誰？", "加入橘時相遇 LINE 官方帳號詢問。"],
   ];
@@ -223,12 +245,12 @@ export function contentHtml(session, opts = {}) {
   <div class="odp-box odp-promo" id="od-hero-promo-box">${heroPromoLines(s, opts.now).map(escapeHtml).join("<br>")}<br><b>${escapeHtml(remainingText(s))}</b></div>
   <section class="odp-sec"><h2>活動詳情</h2>
     <table class="odp-table">
-      <tr><th>日期時間</th><td>${escapeHtml(s.date.replace(/-/g, "/"))}（${WEEKDAYS[new Date(`${s.date}T00:00:00Z`).getUTCDay()]}）${escapeHtml(time)}，13:30 開放報到</td></tr>
+      <tr><th>日期時間</th><td>${escapeHtml(s.date.replace(/-/g, "/"))}（${WEEKDAYS[new Date(`${s.date}T00:00:00Z`).getUTCDay()]}）${escapeHtml(time)}，13:45 開放報到</td></tr>
       <tr><th>地點</th><td>${escapeHtml(s.location_name)}，${escapeHtml(s.location_address)}<br><a href="${mapUrl}" target="_blank" rel="noopener">Google 地圖</a></td></tr>
       <tr><th>交通</th><td>中壢火車站後站步行約 3–5 分鐘；附近有收費停車場</td></tr>
       <tr><th>名額</th><td>男 ${s.max_male} 人、女 ${s.max_female} 人，共 ${s.max_male + s.max_female} 人</td></tr>
       <tr><th>對象</th><td>${s.min_age}–${s.max_age} 歲單身男女</td></tr>
-      <tr><th>含餐</th><td>輕食與沙拉、聖誕麻糬鬆餅、風味花果茶；交換禮物請自備（NT$300–500，不含在活動費用內）</td></tr>
+      <tr><th>含餐</th><td>輕食與沙拉、聖誕麻糬鬆餅、風味花果茶；交換禮物請自備（NT$100–300，不含在活動費用內）</td></tr>
       <tr><th>主辦</th><td>橘時相遇（橘齡未來股份有限公司）× 微笑幸福團</td></tr>
     </table></section>
   <section class="odp-sec"><h2>費用說明</h2>
@@ -237,17 +259,17 @@ export function contentHtml(session, opts = {}) {
       <tr><td>男</td><td>${priceCell(s.price_male_base)}</td><td>${priceCell(s.price_male_early)}</td><td>${priceCell(s.price_male_verified)}</td></tr>
       <tr><td>女</td><td>${priceCell(s.price_female_base)}</td><td>${priceCell(s.price_female_early)}</td><td>${priceCell(s.price_female_verified)}</td></tr>
     </table>
-    <p>${escapeHtml(early)} 23:59 前，在橘時相遇 App 完成人臉驗證與單身驗證，報名現省 NT$300。想拿早鳥價，建議提早一天送出單身驗證。${ext ? `女生名額若到時未滿，女生早鳥價延長到 ${escapeHtml(ext)}。` : ""}</p>
+    <p>${escapeHtml(early)} 23:59 前，在橘時相遇 App 完成人臉驗證與單身驗證，報名${earlySave}。想拿早鳥價，建議 ${escapeHtml(dayBefore)} 前送出單身驗證。${ext ? `女生名額若到時未滿，女生早鳥價延長到 ${escapeHtml(ext)}。` : ""}</p>
     ${onelink ? `<p><a class="odp-btn" href="${onelink}" target="_blank" rel="noopener" data-od-app-download="fee">下載 App 去驗證</a></p>` : ""}
-    <p>活動費用含下午茶餐點與茶飲。聖誕交換禮物請自備：NT$300–500，包裝好並寫上自己的名字，禮物費用不包含在活動費用內。</p>
+    <p>活動費用含下午茶餐點與茶飲。聖誕交換禮物請自備：NT$100–300，包裝好並寫上自己的名字，禮物費用不包含在活動費用內。</p>
   </section>
   <section class="odp-sec"><h2>注意事項</h2><div class="odp-box"><ul>
     <li>本活動限 ${s.min_age}–${s.max_age} 歲單身者參加，報名時需勾選單身聲明</li>
-    <li>請自備一份 NT$300–500 的聖誕交換禮物，包裝好並在外面寫上自己的名字；禮物費用不包含在本活動費用內</li>
+    <li>請自備一份 NT$100–300 的聖誕交換禮物，包裝好並在外面寫上自己的名字；禮物費用不包含在本活動費用內</li>
     <li>退費：付款後 7 天內且活動開始前取消，全額退費；超過 7 天取消退 90%；名額可轉讓給同性別朋友</li>
     <li>${escapeHtml(regEnd)} 報名截止時總人數未滿 20 人，活動取消並全額退費</li>
     <li>報到時：已完成 App 兩項驗證的人免看證件，其他人請攜帶身分證</li>
-    <li>請於 13:30–14:00 完成報到，14:00 準時開始</li>
+    <li>請於 13:45–14:00 完成報到，14:00 準時開始</li>
   </ul></div></section>
   <section class="odp-sec" id="od-party-form"><span id="wf-form"></span><h2>立即報名</h2><p class="odp-hint">線上付款即完成報名｜名額有限</p><div id="od-party"></div></section>
   <section class="odp-sec"><h2>常見問題</h2>
@@ -502,7 +524,7 @@ function initParty() {
     if (!e) { box.hidden = true; return; }
     const s = state.session;
     const g = e.gender || readForm().gender;
-    const saving = g ? basePrice(s, g) - verifiedPrice(s, g) : (isEarlyPeriod(s) ? 300 : 150);
+    const saving = g ? savingFor(s, g) : savingBothText(s);
     const v = eligibilityView(e, saving);
     let html = `<div class="odp-box odp-${v.tone}">${escapeHtml(v.message)}`;
     if (v.choice === "either" || v.choice === "waitReview") {

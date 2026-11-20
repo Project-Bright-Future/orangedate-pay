@@ -21,11 +21,11 @@ const SESSION = {
   min_age: 45,
   max_age: 65,
   price_male_base: 1280,
-  price_male_early: 980,
-  price_male_verified: 1130,
-  price_female_base: 880,
+  price_male_early: 780,
+  price_male_verified: 980,
+  price_female_base: 980,
   price_female_early: 580,
-  price_female_verified: 730,
+  price_female_verified: 780,
   early_bird_deadline: "2026-12-06T15:59:59Z", // 12/6 23:59:59 台北
   female_early_extend_until: "2026-12-11T15:59:59Z",
   female_early_extended: true,
@@ -65,17 +65,17 @@ describe("年齡", () => {
 
 describe("價格顯示", () => {
   it("早鳥截止前後", () => {
-    expect(verifiedPrice(SESSION, "male", new Date("2026-12-06T15:59:59Z"))).toBe(980);
-    expect(verifiedPrice(SESSION, "male", new Date("2026-12-06T16:00:00Z"))).toBe(1130);
+    expect(verifiedPrice(SESSION, "male", new Date("2026-12-06T15:59:59Z"))).toBe(780);
+    expect(verifiedPrice(SESSION, "male", new Date("2026-12-06T16:00:00Z"))).toBe(980);
   });
   it("女生延長期間仍是早鳥價、延長結束後是驗證價", () => {
     expect(verifiedPrice(SESSION, "female", new Date("2026-12-08T00:00:00Z"))).toBe(580);
-    expect(verifiedPrice(SESSION, "female", new Date("2026-12-12T00:00:00Z"))).toBe(730);
-    expect(verifiedPrice({ ...SESSION, female_early_extended: false }, "female", new Date("2026-12-08T00:00:00Z"))).toBe(730);
+    expect(verifiedPrice(SESSION, "female", new Date("2026-12-12T00:00:00Z"))).toBe(780);
+    expect(verifiedPrice({ ...SESSION, female_early_extended: false }, "female", new Date("2026-12-08T00:00:00Z"))).toBe(780);
   });
   it("原價", () => {
     expect(basePrice(SESSION, "male")).toBe(1280);
-    expect(basePrice(SESSION, "female")).toBe(880);
+    expect(basePrice(SESSION, "female")).toBe(980);
   });
 });
 
@@ -154,18 +154,22 @@ describe("頁面內容", () => {
     expect(mdw("2026-12-06T15:59:59Z")).toBe("12/6（日）");
   });
   it("hero 文案依日期切換", () => {
-    expect(heroPromoLines(S, new Date("2026-12-01T00:00:00Z"))[0]).toBe("12/6 前完成 App 人臉與單身驗證，現省 NT$300");
-    const after = heroPromoLines(S, new Date("2026-12-08T00:00:00Z"));
-    expect(after).toContain("完成 App 驗證，報名省 NT$150");
-    expect(after).toContain("女生早鳥價延長到 12/11");
-    expect(after.at(-1)).toBe("總報名未滿 20 人將取消活動並全額退費");
+    expect(heroPromoLines(S, new Date("2026-12-01T00:00:00Z"))[0]).toBe("12/6 前完成 App 人臉與單身驗證，男生省 NT$500、女生省 NT$400");
+    const ext = heroPromoLines(S, new Date("2026-12-08T00:00:00Z"));
+    expect(ext[0]).toBe("完成 App 驗證，男生省 NT$300；女生早鳥價延長到 12/11，省 NT$400");
+    expect(ext.at(-1)).toBe("總報名未滿 20 人將取消活動並全額退費");
+    const after = heroPromoLines({ ...S, female_early_extended: false }, new Date("2026-12-08T00:00:00Z"));
+    expect(after[0]).toBe("完成 App 驗證，男生省 NT$300、女生省 NT$200");
   });
   it("內容含價格表、地點、退費規則、表單掛點，且不用破折號", () => {
     const html = contentHtml(S, { appLink: "https://x" });
-    for (const t of ["NT$1,280", "NT$580", "健行路 41 號", "退 90%", 'id="od-party"', "2026/12/13（日）14:00–17:00", "12/11 報名截止"]) {
+    for (const t of ["NT$1,280", "NT$580", "NT$780", "健行路 41 號", "退 90%", 'id="od-party"', "2026/12/13（日）14:00–17:00", "12/11 報名截止",
+      "13:45 開放報到", "NT$100–300", "報名男生省 NT$500、女生省 NT$400", "12/7 起男生省 NT$300、女生省 NT$200", "建議 12/5 前送出"]) {
       expect(html).toContain(t);
     }
     expect(html).not.toContain("—");
+    expect(html).not.toContain("300–500");
+    expect(html).not.toContain("13:30");
     expect(html).not.toMatch(/孤單|寂寞|大齡/);
   });
 });
