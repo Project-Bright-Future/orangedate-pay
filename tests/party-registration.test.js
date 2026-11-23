@@ -170,6 +170,7 @@ describe("頁面內容", () => {
     expect(html).not.toContain("—");
     expect(html).not.toContain("300–500");
     expect(html).not.toContain("13:30");
+    expect(html).not.toContain("確認信");
     expect(html).not.toMatch(/孤單|寂寞|大齡/);
   });
 });

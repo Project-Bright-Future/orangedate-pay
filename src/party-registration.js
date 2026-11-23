@@ -232,7 +232,7 @@ export function contentHtml(session, opts = {}) {
   const afterEarly = earlyEnd ? mdw(new Date(earlyEnd.getTime() + 1000).toISOString()).replace(/（.）/, "") : "";
   const dayBefore = earlyEnd ? mdw(new Date(earlyEnd.getTime() - 86400000).toISOString()).replace(/（.）/, "") : "";
   const faq = [
-    ["怎樣算報名成功？", "線上付款成功即完成報名，系統會立即寄出確認信。"],
+    ["怎樣算報名成功？", "線上付款成功即完成報名，完成頁會顯示你的名牌編號，請截圖保存。"],
     ["名額滿了怎麼辦？", "可以登記候補，有人釋出名額會依登記順序通知。"],
     ["可以退費嗎？", "付款後 7 天內、活動開始前取消可全額退費；超過 7 天取消退 90%。也可以把名額轉讓給同性別的朋友。"],
     ["需要準備什麼？", "一份 NT$100–300 的聖誕交換禮物，包裝好並寫上自己的名字（禮物費用不含在活動費用內）；未完成 App 驗證的人請帶身分證。"],
@@ -362,7 +362,7 @@ function formHtml(session) {
       <button type="button" class="odp-btn" id="odp-otp-verify" style="flex:0 0 auto">驗證</button></div>
     <p class="odp-msg" id="odp-otp-msg" role="status"></p></div>
   <div id="odp-elig" hidden></div>
-  <div class="odp-field"><label class="odp-label" for="odp-email">Email（寄確認信）</label>
+  <div class="odp-field"><label class="odp-label" for="odp-email">Email（活動通知用）</label>
     <input id="odp-email" name="email" type="email" autocomplete="email"></div>
   <div id="odp-full-fields">
   <div class="odp-field"><label class="odp-label" for="odp-city">居住縣市</label>
@@ -515,7 +515,7 @@ function initParty() {
     if (!e || e.price == null) { btn.textContent = "請先選擇性別"; btn.disabled = true; return; }
     btn.textContent = `確認付款 NT$${formatTwd(e.price)}`;
     btn.disabled = false;
-    hint.textContent = "線上付款即完成報名，系統會立即寄出確認信";
+    hint.textContent = "線上付款即完成報名，完成頁會顯示名牌編號";
   }
 
   function renderElig() {
@@ -629,7 +629,7 @@ function initParty() {
         if (r.httpStatus === 401) { resetOtp(r.body.error); return; }
         if (r.httpStatus >= 400) { showErrors([r.body.error || GENERIC_ERROR]); return; }
         track("event_waitlist_submit", { gender: form.gender });
-        root.innerHTML = `<div class="odp-box odp-ok">候補登記完成，你是第 ${r.body.position} 位。有人釋出名額時，我們會依登記順序用 Email 通知你。</div>`;
+        root.innerHTML = `<div class="odp-box odp-ok">候補登記完成，你是第 ${r.body.position} 位。有人釋出名額時，我們會依登記順序聯繫你。</div>`;
         return;
       }
       const txnToken = await card.getTxnToken();
