@@ -171,6 +171,9 @@ describe("頁面內容", () => {
     expect(html).not.toContain("300–500");
     expect(html).not.toContain("13:30");
     expect(html).not.toContain("確認信");
+    expect(html).not.toContain("橘齡未來");
+    expect(html).not.toContain("活動條款");
+    expect(html).not.toContain("女生名額若到時未滿");
     expect(html).not.toMatch(/孤單|寂寞|大齡/);
   });
 });
