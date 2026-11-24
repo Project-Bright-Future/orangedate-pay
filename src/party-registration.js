@@ -8,7 +8,7 @@ import { escapeHtml, formatTwd } from "./lib/format.js";
 import { otpCreateRoute, otpVerifyRoute, GENERIC_ERROR } from "./lib/otp.js";
 export { escapeHtml };
 
-export const CITIES = ["桃園", "新竹", "苗栗", "台北", "新北", "其他"];
+export const CITIES = ["桃園", "新竹", "苗栗", "台北", "新北", "基隆", "台中", "彰化", "其他"];
 export const SOURCES = [
   { value: "smile_group", label: "微笑幸福團" },
   { value: "orangedate", label: "橘時相遇" },
@@ -138,7 +138,7 @@ export function validateForm(form, session) {
   if (interests.length !== 3) errs.push("請填寫 3 個興趣關鍵字");
   if (interests.some((i) => i.length > 6)) errs.push("每個興趣關鍵字最多 6 個字");
   if (!form.single_declared) errs.push("請勾選單身聲明");
-  if (!form.terms_agreed) errs.push("請同意個資與活動條款");
+  if (!form.terms_agreed) errs.push("請同意隱私權政策");
   if (!form.photo_consent) errs.push("請選擇拍照同意");
   if (!form.source) errs.push("請選擇從哪裡知道這場活動");
   return errs;
@@ -221,7 +221,6 @@ export function contentHtml(session, opts = {}) {
   const s = session;
   const early = mdw(s.early_bird_deadline);
   const earlyShort = early.replace(/（.）/, "");
-  const ext = mdw(s.female_early_extend_until).replace(/（.）/, "");
   const regEnd = mdw(s.registration_end_at).replace(/（.）/, "");
   const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.location_address || s.location_name)}`;
   const time = `${String(s.start_time).slice(0, 5)}–${String(s.end_time || "").slice(0, 5)}`;
@@ -251,7 +250,6 @@ export function contentHtml(session, opts = {}) {
       <tr><th>名額</th><td>男 ${s.max_male} 人、女 ${s.max_female} 人，共 ${s.max_male + s.max_female} 人</td></tr>
       <tr><th>對象</th><td>${s.min_age}–${s.max_age} 歲單身男女</td></tr>
       <tr><th>含餐</th><td>輕食與沙拉、聖誕麻糬鬆餅、風味花果茶；交換禮物請自備（NT$100–300，不含在活動費用內）</td></tr>
-      <tr><th>主辦</th><td>橘時相遇（橘齡未來股份有限公司）× 微笑幸福團</td></tr>
     </table></section>
   <section class="odp-sec"><h2>費用說明</h2>
     <table class="odp-table odp-price">
@@ -259,7 +257,7 @@ export function contentHtml(session, opts = {}) {
       <tr><td>男</td><td>${priceCell(s.price_male_base)}</td><td>${priceCell(s.price_male_early)}</td><td>${priceCell(s.price_male_verified)}</td></tr>
       <tr><td>女</td><td>${priceCell(s.price_female_base)}</td><td>${priceCell(s.price_female_early)}</td><td>${priceCell(s.price_female_verified)}</td></tr>
     </table>
-    <p>${escapeHtml(early)} 23:59 前，在橘時相遇 App 完成人臉驗證與單身驗證，報名${earlySave}。想拿早鳥價，建議 ${escapeHtml(dayBefore)} 前送出單身驗證。${ext ? `女生名額若到時未滿，女生早鳥價延長到 ${escapeHtml(ext)}。` : ""}</p>
+    <p>${escapeHtml(early)} 23:59 前，在橘時相遇 App 完成人臉驗證與單身驗證，報名${earlySave}。想拿早鳥價，建議 ${escapeHtml(dayBefore)} 前送出單身驗證。</p>
     ${onelink ? `<p><a class="odp-btn" href="${onelink}" target="_blank" rel="noopener" data-od-app-download="fee">下載 App 去驗證</a></p>` : ""}
     <p>活動費用含下午茶餐點與茶飲。聖誕交換禮物請自備：NT$100–300，包裝好並寫上自己的名字，禮物費用不包含在活動費用內。</p>
   </section>
@@ -382,7 +380,7 @@ function formHtml(session) {
   <div class="odp-field"><label class="odp-label" for="odp-note">其他想告訴我們的事（選填）</label>
     <textarea id="odp-note" name="note" placeholder="素食、過敏等"></textarea></div>
   <label class="odp-check"><input type="checkbox" name="single_declared"> <span>我確認目前為單身</span></label>
-  <label class="odp-check"><input type="checkbox" name="terms_agreed"> <span>我已閱讀並同意<a href="${PRIVACY_URL}" target="_blank" rel="noopener">隱私權政策</a>與活動條款</span></label>
+  <label class="odp-check"><input type="checkbox" name="terms_agreed"> <span>我已閱讀並同意<a href="${PRIVACY_URL}" target="_blank" rel="noopener">隱私權政策</a></span></label>
   </div>
   <div class="odp-card" id="odp-card" hidden>
     <p class="odp-label">信用卡付款</p>
@@ -443,8 +441,16 @@ function initParty() {
   const $ = (sel) => root.querySelector(sel);
 
   // 頁面其他地方的按鈕（Hero CTA、下載 App）也記事件
-  document.querySelectorAll('a[href="#od-party"],a[href="#wf-form"],[data-od-cta]').forEach((el) =>
-    el.addEventListener("click", () => track("event_cta_click")));
+  // Webflow Hero「立即報名」是 href="#"、id="signin"，要自己捲到報名表
+  document.querySelectorAll('a[href="#od-party"],a[href="#wf-form"],[data-od-cta],#signin').forEach((el) =>
+    el.addEventListener("click", (e) => {
+      track("event_cta_click");
+      const target = document.getElementById("od-party-form");
+      if (target) {
+        e.preventDefault();
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }));
   document.querySelectorAll("[data-od-app-download]").forEach((el) =>
     el.addEventListener("click", () => track("event_app_download_click", { position: el.dataset.odAppDownload || "" })));
   track("event_page_view", { ...utm });
